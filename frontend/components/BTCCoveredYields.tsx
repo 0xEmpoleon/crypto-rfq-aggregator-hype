@@ -10,7 +10,7 @@ import React, { useState, useEffect, useMemo } from 'react';
    ═══════════════════════════════════════════════════════════════════ */
 
 interface ParsedOption { instrument: string; strike: number; expiry: string; expiryTs: number; type: 'C' | 'P'; markPrice: number; markIv: number; futuresPrice: number; dte: number; }
-interface CellData { apy: number; markIv: number; markPrice: number; futuresPrice: number; dte: number; premiumUsd: number; probExercise: number; }
+interface CellData { apy: number; markIv: number; markPrice: number; futuresPrice: number; dte: number; premiumUsd: number; probExercise: number; greeks: { delta: number; gamma: number; theta: number; vega: number; }; }
 interface SuggestedTrade { instrument: string; type: 'Put' | 'Call'; strike: number; expiry: string; dte: number; apy: number; markIv: number; futuresPrice: number; probExercise: number; premiumUsd: number; moneyness: number; }
 type Status = 'ok' | 'err' | 'load';
 
@@ -24,6 +24,23 @@ function pEx(S: number, K: number, T: number, s: number, type: 'C' | 'P'): numbe
     if (T <= 0 || s <= 0) return 0;
     const d2 = (Math.log(S / K) - 0.5 * s * s * T) / (s * Math.sqrt(T));
     return type === 'C' ? normCdf(d2) : normCdf(-d2);
+}
+
+function bsGreeks(S: number, K: number, T: number, sigma: number, type: 'C' | 'P') {
+    if (T <= 0 || sigma <= 0) return { delta: 0, gamma: 0, theta: 0, vega: 0 };
+    const sqrtT = Math.sqrt(T);
+    const d1 = (Math.log(S / K) + 0.5 * sigma * sigma * T) / (sigma * sqrtT);
+    const normPdf = (x: number) => Math.exp(-0.5 * x * x) / Math.sqrt(2 * Math.PI);
+    const Nd1 = normCdf(d1);
+    const nPdfd1 = normPdf(d1);
+
+    // r=0 assumptions for crypto
+    const delta = type === 'C' ? Nd1 : Nd1 - 1;
+    const gamma = nPdfd1 / (S * sigma * sqrtT);
+    const vega = S * nPdfd1 * sqrtT / 100; // per 1% change in IV
+    const theta = -(S * sigma * nPdfd1) / (2 * sqrtT) / 365; // per day
+
+    return { delta, gamma, theta, vega };
 }
 function parseInst(n: string) { const p = n.split('-'); return p.length === 4 ? { expiry: p[1], strike: +p[2], type: p[3] as 'C' | 'P' } : null; }
 function expiryToDate(e: string): Date {
@@ -351,7 +368,16 @@ export default function BTCCoveredYields({ darkMode }: { darkMode: boolean }) {
         const cells: Record<string, CellData> = {};
         for (const o of f) {
             const k = `${o.type}-${o.strike}-${o.expiry}`;
-            cells[k] = { apy: o.type === 'P' ? putApy(o.markPrice, o.futuresPrice, o.strike, o.dte) : callApy(o.markPrice, o.dte), markIv: o.markIv, markPrice: o.markPrice, futuresPrice: o.futuresPrice, dte: o.dte, premiumUsd: o.markPrice * o.futuresPrice, probExercise: pEx(o.futuresPrice, o.strike, o.dte / 365, o.markIv / 100, o.type) };
+            cells[k] = {
+                apy: o.type === 'P' ? putApy(o.markPrice, o.futuresPrice, o.strike, o.dte) : callApy(o.markPrice, o.dte),
+                markIv: o.markIv,
+                markPrice: o.markPrice,
+                futuresPrice: o.futuresPrice,
+                dte: o.dte,
+                premiumUsd: o.markPrice * o.futuresPrice,
+                probExercise: pEx(o.futuresPrice, o.strike, o.dte / 365, o.markIv / 100, o.type),
+                greeks: bsGreeks(o.futuresPrice, o.strike, o.dte / 365, o.markIv / 100, o.type)
+            };
         }
         return { exps, putK, callK, cells };
     }, [opts, spot]);
@@ -373,11 +399,11 @@ export default function BTCCoveredYields({ darkMode }: { darkMode: boolean }) {
             <td key={k} style={{ ...dataFont, color: 'var(--text-muted)', padding: '4px 6px', borderBottom: '1px solid var(--border-color)' }}>—</td>
         );
 
-        const { apy, probExercise: pe } = d;
+        const { apy, probExercise: pe, greeks } = d;
         const bg = isP
             ? 'rgba(37,99,235,0.2)'  /* blue highlight when pinned */
             : isL ? 'rgba(37,99,235,0.1)' : heatColor(apy, type, darkMode);
-        const det = { type: type === 'P' ? 'Put' : 'Call', strike, exp: exp.label, apy: apy.toFixed(1), dte: d.dte, markIv: d.markIv.toFixed(1), markPrice: d.markPrice, futuresPrice: d.futuresPrice, premiumUsd: d.premiumUsd, probExercise: pe };
+        const det = { type: type === 'P' ? 'Put' : 'Call', strike, exp: exp.label, apy: apy.toFixed(1), dte: d.dte, markIv: d.markIv.toFixed(1), markPrice: d.markPrice, futuresPrice: d.futuresPrice, premiumUsd: d.premiumUsd, probExercise: pe, greeks };
 
         return (
             <td key={k}
@@ -648,6 +674,10 @@ export default function BTCCoveredYields({ darkMode }: { darkMode: boolean }) {
                                     ['Prem $', `$${tip.d.premiumUsd.toFixed(2)}`],
                                     ['Prem ฿', `${(tip.d.premiumUsd / tip.d.futuresPrice).toFixed(4)} ฿`],
                                     ['P(ex)', `${(tip.d.probExercise * 100).toFixed(1)}%`],
+                                    ['Δ Delta', tip.d.greeks.delta.toFixed(2)],
+                                    ['Γ Gamma', tip.d.greeks.gamma.toFixed(5)],
+                                    ['Θ Theta', tip.d.greeks.theta.toFixed(2)],
+                                    ['ν Vega', tip.d.greeks.vega.toFixed(2)],
                                 ].map(([l, v]) => (
                                     <React.Fragment key={l}>
                                         <span style={{ color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{l}</span>
