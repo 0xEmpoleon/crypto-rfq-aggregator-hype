@@ -286,7 +286,7 @@ export default function BTCCoveredYields({ darkMode }: { darkMode: boolean }) {
                 const m = o.type === 'C' ? o.strike / o.futuresPrice : o.futuresPrice / o.strike;
                 if (m < 1 || m > 1.15) continue;
                 const pe = pEx(o.futuresPrice, o.strike, o.dte / 365, o.markIv / 100, o.type);
-                if (pe > 0.30) continue; // Only strategies with ≤ 30% P(exercise)
+                if (pe > 0.40) continue; // Only strategies with ≤ 40% P(exercise)
                 t.push({ instrument: o.instrument, type: o.type === 'P' ? 'Put' : 'Call', strike: o.strike, expiry: o.expiry, dte: o.dte, apy, markIv: o.markIv, futuresPrice: o.futuresPrice, probExercise: pe, premiumUsd: o.markPrice * o.futuresPrice, moneyness: (m - 1) * 100 });
             }
             t.sort((a, b) => b.apy - a.apy);
