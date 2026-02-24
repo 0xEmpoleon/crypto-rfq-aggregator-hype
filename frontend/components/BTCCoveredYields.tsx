@@ -556,17 +556,30 @@ export default function BTCCoveredYields({ darkMode }: { darkMode: boolean }) {
                 {tip && (() => {
                     const W = typeof window !== 'undefined' ? window : { innerHeight: 832, innerWidth: 1470 };
                     return (
-                        <div style={{ position: 'fixed', top: Math.min(Math.max(8, tip.y - 120), W.innerHeight - 200), left: Math.min(tip.x + 12, W.innerWidth - 210), backgroundColor: 'var(--bg-panel)', border: '1px solid var(--border-strong)', padding: '8px', borderRadius: '6px', pointerEvents: 'none', zIndex: 9999, boxShadow: '0 4px 12px rgba(0,0,0,0.4)', width: '12rem', fontSize: 'var(--t-data)' }}>
-                            <strong style={{ display: 'block', borderBottom: '1px solid var(--border-color)', paddingBottom: '3px', marginBottom: '4px', fontSize: 'var(--t-label)', textTransform: 'uppercase', letterSpacing: '0.05em', color: tip.d.type === 'Put' ? 'var(--green)' : 'var(--yellow)' }}>
-                                {tip.d.type === 'Put' ? 'Cash Secured Put' : 'Covered Call'}
+                        <div style={{ position: 'fixed', top: Math.min(Math.max(8, tip.y - 130), W.innerHeight - 220), left: Math.min(tip.x + 12, W.innerWidth - 230), backgroundColor: 'var(--bg-panel)', border: '1px solid var(--border-strong)', padding: '8px 10px', borderRadius: '6px', pointerEvents: 'none', zIndex: 9999, boxShadow: '0 4px 12px rgba(0,0,0,0.4)', width: '14rem', fontSize: 'var(--t-data)' }}>
+                            <strong style={{ display: 'block', borderBottom: '1px solid var(--border-color)', paddingBottom: '3px', marginBottom: '6px', fontSize: 'var(--t-label)', textTransform: 'uppercase', letterSpacing: '0.05em', color: tip.d.type === 'Put' ? 'var(--green)' : 'var(--yellow)' }}>
+                                {tip.d.type === 'Put' ? '🟢 Cash Secured Put' : '🟡 Covered Call'}
                             </strong>
-                            {[['Strike', `$${tip.d.strike.toLocaleString()}`], ['Expiry', tip.d.exp], ['DTE', `${tip.d.dte}d`], ['Futures', `$${tip.d.futuresPrice.toLocaleString('en-US', { maximumFractionDigits: 0 })}`], ['IV', `${tip.d.markIv}%`], ['Prem (1฿)', `$${tip.d.premiumUsd.toFixed(2)} · ${(tip.d.premiumUsd / tip.d.futuresPrice).toFixed(4)}฿`], ['P(ex)', `${(tip.d.probExercise * 100).toFixed(1)}%`]].map(([l, v]) => (
-                                <div key={l} style={{ display: 'flex', justifyContent: 'space-between', lineHeight: '1.5', fontVariantNumeric: 'tabular-nums' }}>
-                                    <span style={{ color: 'var(--text-muted)' }}>{l}</span><span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{v}</span>
-                                </div>
-                            ))}
-                            <div style={{ borderTop: '1px solid var(--border-color)', marginTop: '4px', paddingTop: '4px', display: 'flex', justifyContent: 'space-between' }}>
-                                <span style={{ color: 'var(--text-muted)' }}>APR</span><span style={{ fontWeight: 700, fontSize: 'var(--t-title)', color: 'var(--text-primary)' }}>{tip.d.apy}%</span>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', rowGap: '1px', columnGap: '12px', fontVariantNumeric: 'tabular-nums', lineHeight: '1.6' }}>
+                                {[
+                                    ['Strike', `$${tip.d.strike.toLocaleString()}`],
+                                    ['Expiry', tip.d.exp],
+                                    ['DTE', `${tip.d.dte}d`],
+                                    ['Futures', `$${tip.d.futuresPrice.toLocaleString('en-US', { maximumFractionDigits: 0 })}`],
+                                    ['IV', `${tip.d.markIv}%`],
+                                    ['Prem $', `$${tip.d.premiumUsd.toFixed(2)}`],
+                                    ['Prem ฿', `${(tip.d.premiumUsd / tip.d.futuresPrice).toFixed(4)} ฿`],
+                                    ['P(ex)', `${(tip.d.probExercise * 100).toFixed(1)}%`],
+                                ].map(([l, v]) => (
+                                    <React.Fragment key={l}>
+                                        <span style={{ color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{l}</span>
+                                        <span style={{ fontWeight: 600, color: 'var(--text-primary)', textAlign: 'left' }}>{v}</span>
+                                    </React.Fragment>
+                                ))}
+                            </div>
+                            <div style={{ borderTop: '1px solid var(--border-color)', marginTop: '6px', paddingTop: '4px', display: 'grid', gridTemplateColumns: 'auto 1fr', columnGap: '12px', alignItems: 'center' }}>
+                                <span style={{ color: 'var(--text-muted)' }}>APR</span>
+                                <span style={{ fontWeight: 700, fontSize: 'var(--t-title)', color: 'var(--text-primary)' }}>{tip.d.apy}%</span>
                             </div>
                         </div>
                     );
