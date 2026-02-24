@@ -578,7 +578,8 @@ export default function BTCCoveredYields({ darkMode }: { darkMode: boolean }) {
                         const uniqueExpiries = Array.from(new Set(legs.map(l => l.expiry)));
                         const isMixed = uniqueExpiries.length > 1;
                         const expiryLabel = isMixed ? uniqueExpiries.join(' / ') : legs[0].expiry;
-                        const dteLabel = isMixed ? `${Math.min(...legs.map(l => l.dte))}–${Math.max(...legs.map(l => l.dte))}d` : `${legs[0].dte}d`;
+                        const avgDte = legs.reduce((s, l) => s + l.dte, 0) / legs.length;
+                        const dteLabel = isMixed ? `${Math.min(...legs.map(l => l.dte))}–${Math.max(...legs.map(l => l.dte))}d (avg ${avgDte.toFixed(0)}d)` : `${legs[0].dte}d`;
                         const dir = isCall ? 'below' : 'above';
                         const scoreColor = score >= 7 ? 'var(--green)' : score >= 4 ? 'var(--yellow)' : 'var(--red)';
                         const totalCost = isCall
