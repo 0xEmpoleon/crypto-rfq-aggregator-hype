@@ -19,7 +19,6 @@ function normCdf(x: number): number {
     const sign = x < 0 ? -1 : 1; const t = 1 / (1 + p * Math.abs(x));
     return 0.5 * (1 + sign * (1 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * Math.exp(-x * x / 2)));
 }
-function normPdf(x: number): number { return Math.exp(-0.5 * x * x) / Math.sqrt(2 * Math.PI); }
 
 function pEx(S: number, K: number, T: number, s: number, type: 'C' | 'P'): number {
     if (T <= 0 || s <= 0) return 0;
@@ -81,70 +80,41 @@ function conditionalTailLoss(S: number, K: number, T: number, sigma: number, typ
     }
 }
 
-/* Score a ladder combination */
+/* Score a ladder combination — mixed-expiry safe (uses per-leg dte/fp) */
 function scoreLadder(legs: SuggestedTrade[], dvolVal: number | null): Omit<ScoredLadder, 'topFactor'> & { factors: number[] } {
     const n = legs.length;
-    const fp = legs[0].futuresPrice;
-    const dte = legs[0].dte;
-    const T = dte / 365;
-    const dv = dvolVal || 60; // fallback DVOL
+    const dv = dvolVal || 60;
 
-    // ── Per-leg calculations ──
-    let totalEv = 0;
-    let totalRisk = 0;
-    let totalPrem = 0;
-    let totalApy = 0;
-    let volEdgeSum = 0;
+    let totalEv = 0, totalRisk = 0, totalPrem = 0, totalApy = 0, volEdgeSum = 0, thetaSum = 0;
 
     for (const l of legs) {
         const sigma = l.markIv / 100;
-        const pOTM = 1 - l.probExercise;
-        const premUsd = l.premiumUsd;
-        const tailLoss = conditionalTailLoss(fp, l.strike, T, sigma, l.type === 'Call' ? 'C' : 'P');
-
-        // EV = premium × P(OTM) − tail_loss × P(ITM)
-        const ev = premUsd * pOTM - tailLoss * l.probExercise;
+        const T = l.dte / 365;
+        const pITM = l.probExercise;
+        const tailLoss = conditionalTailLoss(l.futuresPrice, l.strike, T, sigma, l.type === 'Call' ? 'C' : 'P');
+        const ev = l.premiumUsd * (1 - pITM) - tailLoss * pITM;
+        const maxLoss = l.type === 'Put' ? Math.max(0, l.strike * 0.15) : l.futuresPrice * sigma * 2 * Math.sqrt(T);
         totalEv += ev;
-
-        // Risk = P(exercise) × max_loss
-        // Max loss for CSP: strike - futures + premium (if assigned deep ITM)
-        // Max loss for CC: 2σ move upside missed
-        const maxLoss = l.type === 'Put'
-            ? Math.max(0, l.strike * 0.15) // 15% drawdown scenario
-            : fp * sigma * 2 * Math.sqrt(T);
-        totalRisk += l.probExercise * maxLoss;
-
-        totalPrem += premUsd;
+        totalRisk += pITM * maxLoss;
+        totalPrem += l.premiumUsd;
         totalApy += l.apy;
-
-        // Vol edge: selling rich vol?
         volEdgeSum += (l.markIv - dv) / Math.max(dv, 1);
+        thetaSum += l.premiumUsd / l.dte;
     }
 
+    const avgDte = legs.reduce((s, l) => s + l.dte, 0) / n;
+    const fp0 = legs[0].futuresPrice;
     const avgApy = totalApy / n;
-    const evAnnual = totalEv * (365 / dte);
+    const evAnnual = totalEv * (365 / avgDte);
     const volEdge = volEdgeSum / n;
-    const thetaEff = totalPrem / dte;
+    const thetaEff = thetaSum;                            // sum of per-leg θ
     const riskReturn = totalRisk > 0 ? totalEv / totalRisk : 0;
-
-    // ── Correlation-adjusted P(any exercise) ──────────────────────
-    // BTC is a single underlying — all legs move together regardless of expiry.
-    // P(any exercise) = P(nearest-to-money leg exercises) = maxPex.
-    // This is the correct value: BTC either crosses your closest strike or it doesn't.
-    // Adding more legs doesn't materially increase P(any ex) on a correlated single asset.
     const maxPex = Math.max(...legs.map(l => l.probExercise));
     const probAllOTM = 1 - maxPex;
-
-    // Kelly: f* = P(allOTM) - P(anyEx) × avgLoss/totalPrem
-    const probAnyEx = 1 - probAllOTM;
-    const avgLoss = totalRisk / Math.max(probAnyEx, 0.01);
-    const kelly = totalPrem > 0 ? Math.max(0, probAllOTM - probAnyEx * avgLoss / totalPrem) : 0;
-
-    // Diversification: strike spread / futures
+    const avgLoss = totalRisk / Math.max(maxPex, 0.01);
+    const kelly = totalPrem > 0 ? Math.max(0, probAllOTM - maxPex * avgLoss / totalPrem) : 0;
     const strikes = legs.map(l => l.strike);
-    const diversification = (Math.max(...strikes) - Math.min(...strikes)) / fp;
-
-    // Raw factor values (before normalization)
+    const diversification = (Math.max(...strikes) - Math.min(...strikes)) / fp0;
     const factors = [evAnnual, volEdge, riskReturn, thetaEff, kelly, diversification];
 
     return { legs, score: 0, ev: totalEv, evAnnual, volEdge, thetaEff, riskReturn, kelly, diversification, probAllOTM, totalPrem, avgApy, factors };
@@ -219,21 +189,16 @@ function buildOptimalLadder(trades: SuggestedTrade[], type: 'Call' | 'Put', dvol
         }
     }
 
-    // ── Cross-expiry combinations ─────────────────────────────────
-    // Use top 10 options by APY to keep combinatorics manageable
+    // ── Cross-expiry combinations (top 10 by APR) ─────────────────
     const top = all.slice(0, 10);
     if (top.length >= 3) {
-        for (let i = 0; i < top.length; i++) {
-            for (let j = i + 1; j < top.length; j++) {
-                // Require different strike OR different expiry
-                if (top[i].strike === top[j].strike && top[i].expiry === top[j].expiry) continue;
+        const seen = new Set<string>();
+        for (let i = 0; i < top.length; i++)
+            for (let j = i + 1; j < top.length; j++)
                 for (let k = j + 1; k < top.length; k++) {
-                    if (top[k].strike === top[i].strike && top[k].expiry === top[i].expiry) continue;
-                    if (top[k].strike === top[j].strike && top[k].expiry === top[j].expiry) continue;
-                    allCandidates.push(scoreLadder([top[i], top[j], top[k]], dvolVal));
+                    const key = [i, j, k].map(x => `${top[x].strike}-${top[x].expiry}`).join('|');
+                    if (!seen.has(key)) { seen.add(key); allCandidates.push(scoreLadder([top[i], top[j], top[k]], dvolVal)); }
                 }
-            }
-        }
     }
 
     if (!allCandidates.length) return null;
@@ -241,7 +206,22 @@ function buildOptimalLadder(trades: SuggestedTrade[], type: 'Call' | 'Put', dvol
     return ranked[0] || null;
 }
 
-/* Derive-style heat */
+/* Hover tooltip — CSS-only, no state, defined once at module level */
+const Tip = ({ text, children }: { text: string; children: React.ReactNode }) => (
+    <span style={{ position: 'relative', cursor: 'help', borderBottom: '1px dotted var(--text-muted)', color: 'var(--text-secondary)', display: 'inline-block' }} className="tip-wrap">
+        {children}
+        <span className="tip-popup" style={{
+            position: 'absolute', bottom: 'calc(100% + 4px)', left: '50%', transform: 'translateX(-50%)',
+            backgroundColor: 'var(--bg-panel)', border: '1px solid var(--border-strong)', borderRadius: '4px',
+            padding: '4px 8px', fontSize: 'var(--t-meta)', lineHeight: '1.35', color: 'var(--text-primary)',
+            width: '200px', textAlign: 'left', boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+            pointerEvents: 'none', opacity: 0, transition: 'opacity 0.15s', zIndex: 9999, whiteSpace: 'normal',
+        }}>{text}</span>
+        <style>{`.tip-wrap:hover .tip-popup { opacity: 1 !important; }`}</style>
+    </span>
+);
+
+/* Derive-style heat color */
 function heatColor(apy: number, type: 'P' | 'C', dark: boolean): string {
     const i = Math.min(Math.max(apy, 0), 120) / 120;
     if (dark) {
@@ -265,6 +245,7 @@ export default function BTCCoveredYields({ darkMode }: { darkMode: boolean }) {
     const [trades, setTrades] = useState<SuggestedTrade[]>([]);
     const [locked, setLocked] = useState<Set<string>>(new Set());
     const [sugAt, setSugAt] = useState<Date | null>(null);
+    const [dataAt, setDataAt] = useState<Date | null>(null);
     const [st, setSt] = useState<{ spot: Status; opt: Status; dvol: Status }>({ spot: 'load', opt: 'load', dvol: 'load' });
 
     const tip = pinnedTip || hoverTip;
@@ -286,11 +267,11 @@ export default function BTCCoveredYields({ darkMode }: { darkMode: boolean }) {
                     const ed = expiryToDate(info.expiry); const dte = Math.max(0, Math.ceil((ed.getTime() - now) / 86400000)); if (dte <= 0) continue;
                     arr.push({ instrument: it.instrument_name, strike: info.strike, expiry: info.expiry, expiryTs: ed.getTime(), type: info.type, markPrice: it.mark_price, markIv: it.mark_iv, futuresPrice: it.underlying_price, dte });
                 }
-                setOpts(arr); setLoading(false);
+                setOpts(arr); setLoading(false); setDataAt(new Date());
             } catch { ns.opt = 'err'; setLoading(false); }
             setSt(ns);
         };
-        go(); const iv = setInterval(go, 5000); return () => clearInterval(iv);
+        go(); const iv = setInterval(go, 15000); return () => clearInterval(iv);
     }, []);
 
     // ── Suggested trades (60s, DTE ≥ 15) ──────────────────────────
@@ -448,9 +429,15 @@ export default function BTCCoveredYields({ darkMode }: { darkMode: boolean }) {
                     <span style={{ fontSize: 'var(--t-title)', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--text-primary)' }}>
                         ⚡ Top Yields
                     </span>
-                    <span style={{ fontSize: 'var(--t-meta)', color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>
-                        {sugAt ? sugAt.toLocaleTimeString('en-GB', { hour12: false }) : '--'} · DTE≥15
-                    </span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontVariantNumeric: 'tabular-nums' }}>
+                        {/* Pulsing live indicator */}
+                        <span style={{ display: 'inline-block', width: '6px', height: '6px', borderRadius: '50%', backgroundColor: dataAt ? 'var(--green)' : 'var(--text-muted)', boxShadow: dataAt ? '0 0 4px var(--green)' : 'none' }} />
+                        <span style={{ fontSize: 'var(--t-meta)', color: 'var(--text-muted)' }}>
+                            Data: <span style={{ color: 'var(--text-secondary)' }}>{dataAt ? dataAt.toLocaleTimeString('en-GB', { hour12: false }) : '—'}</span>
+                            {' · '}Strategy: <span style={{ color: 'var(--text-secondary)' }}>{sugAt ? sugAt.toLocaleTimeString('en-GB', { hour12: false }) : '—'}</span>
+                            {' · '}15s
+                        </span>
+                    </div>
                 </div>
                 {!trades.length ? (
                     <div style={{ color: 'var(--text-muted)', fontSize: 'var(--t-data)' }}>{loading ? 'Loading...' : 'Scanning...'}</div>
@@ -476,24 +463,16 @@ export default function BTCCoveredYields({ darkMode }: { darkMode: boolean }) {
                             ? (spot || legs[0].futuresPrice) * legs.length
                             : legs.reduce((s, l) => s + l.strike, 0);
                         const netCost = totalCost - totalPrem;
-                        const yieldOnCapital = totalCost > 0 ? (totalPrem / totalCost) * (365 / legs[0].dte) * 100 : 0;
-
-                        /* Inline tooltip component — pure CSS hover, no state needed */
-                        const Tip = ({ text, children }: { text: string; children: React.ReactNode }) => (
-                            <span style={{ position: 'relative', cursor: 'help', borderBottom: '1px dotted var(--text-muted)', color: 'var(--text-secondary)', display: 'inline-block' }}
-                                className="tip-wrap">
-                                {children}
-                                <span className="tip-popup" style={{
-                                    position: 'absolute', bottom: 'calc(100% + 4px)', left: '50%', transform: 'translateX(-50%)',
-                                    backgroundColor: 'var(--bg-panel)', border: '1px solid var(--border-strong)', borderRadius: '4px',
-                                    padding: '4px 8px', fontSize: 'var(--t-meta)', lineHeight: '1.35', color: 'var(--text-primary)',
-                                    width: '200px', textAlign: 'left', boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
-                                    pointerEvents: 'none', opacity: 0, transition: 'opacity 0.15s', zIndex: 9999,
-                                    whiteSpace: 'normal',
-                                }}>{text}</span>
-                                <style>{`.tip-wrap:hover .tip-popup { opacity: 1 !important; }`}</style>
-                            </span>
-                        );
+                        // Yield on capital: compute per leg (each leg's own DTE) then average.
+                        // For CC: capital per leg = spot price of BTC (1 BTC per leg)
+                        // For CSP: capital per leg = strike (cash to secure)
+                        const capitalPerLeg = isCall
+                            ? (spot || legs[0].futuresPrice)
+                            : null; // per-leg for CSP defined below
+                        const yieldOnCapital = legs.reduce((sum, l) => {
+                            const cap = isCall ? capitalPerLeg! : l.strike;
+                            return sum + (cap > 0 ? (l.premiumUsd / cap) * (365 / l.dte) * 100 : 0);
+                        }, 0) / legs.length;
 
                         return (
                             <div style={{ border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-card)', borderRadius: '4px', borderLeft: `3px solid ${accent}`, overflow: 'visible' }}>
@@ -518,7 +497,7 @@ export default function BTCCoveredYields({ darkMode }: { darkMode: boolean }) {
                                     {legs.map((l, i) => (
                                         <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '1px 0', borderTop: i > 0 ? '1px solid var(--border-color)' : 'none', color: 'var(--text-secondary)' }}>
                                             <span>Sell {isCall ? 'CC' : 'CSP'} <span style={{ color: 'var(--text-primary)', fontWeight: 500 }}>${l.strike.toLocaleString()}</span>{isMixed ? <span style={{ color: 'var(--text-muted)', fontSize: 'var(--t-micro)', marginLeft: '3px' }}>{l.expiry}</span> : null}</span>
-                                            <span>${l.premiumUsd.toFixed(0)} · {l.apy.toFixed(0)}% · P(ex) {(l.probExercise * 100).toFixed(0)}%</span>
+                                            <span>${l.premiumUsd.toFixed(0)} · {(l.premiumUsd / l.futuresPrice).toFixed(4)} BTC · {l.apy.toFixed(0)}% · P(ex) {(l.probExercise * 100).toFixed(0)}%</span>
                                         </div>
                                     ))}
                                 </div>
@@ -530,7 +509,13 @@ export default function BTCCoveredYields({ darkMode }: { darkMode: boolean }) {
                                     <br />
                                     <Tip text="Volatility Edge: how much richer the option's implied vol is vs DVOL index. Positive = selling overpriced vol = edge.">Vol edge</Tip>: {volEdge > 0 ? '+' : ''}{(volEdge * 100).toFixed(1)}% vs DVOL · <Tip text="Kelly Criterion: optimal fraction of capital to allocate based on edge vs variance. Higher = more confident bet. Used by professional traders for position sizing.">Kelly</Tip>: {(kelly * 100).toFixed(1)}% · <Tip text="Risk/Return Ratio: expected value ÷ probability-weighted max loss. Higher = better risk-adjusted return. Think of it like a Sortino ratio for options.">R/R</Tip>: {riskReturn.toFixed(2)}
                                     <br />
-                                    If BTC stays {dir} all strikes by {expiryLabel}, keep ${totalPrem.toFixed(0)} ({avgApy.toFixed(0)}% APR).
+                                    {(() => {
+                                        const fp = spot || legs[0].futuresPrice;
+                                        const totalPremBtc = legs.reduce((s, l) => s + l.premiumUsd / l.futuresPrice, 0);
+                                        const avgDte = legs.reduce((s, l) => s + l.dte, 0) / legs.length;
+                                        const annualBtc = totalPremBtc * (365 / avgDte);
+                                        return <>If BTC stays {dir} all strikes by {expiryLabel}, keep <span style={{ color: accent, fontWeight: 600 }}>${totalPrem.toFixed(0)} ≈ {totalPremBtc.toFixed(4)} BTC</span> ({avgApy.toFixed(0)}% APR · {annualBtc.toFixed(4)} BTC/yr annualised).</>;
+                                    })()}
                                 </div>
                             </div>
                         );
