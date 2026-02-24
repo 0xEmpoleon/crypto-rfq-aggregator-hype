@@ -573,7 +573,7 @@ export default function BTCCoveredYields({ darkMode }: { darkMode: boolean }) {
                                 ].map(([l, v]) => (
                                     <React.Fragment key={l}>
                                         <span style={{ color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{l}</span>
-                                        <span style={{ fontWeight: 600, color: 'var(--text-primary)', textAlign: 'left' }}>{v}</span>
+                                        <span style={{ fontWeight: 600, color: 'var(--text-primary)', textAlign: 'right' }}>{v}</span>
                                     </React.Fragment>
                                 ))}
                             </div>
