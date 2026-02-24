@@ -155,14 +155,14 @@ function rankLadders(candidates: ReturnType<typeof scoreLadder>[]): ScoredLadder
     }).sort((a, b) => b.score - a.score);
 }
 
-/* Generic k-combination generator */
-function combinations<T>(arr: T[], k: number): T[][] {
+/* k-combination WITH repetition — same option can appear multiple times in a ladder */
+function combinationsWithRep<T>(arr: T[], k: number): T[][] {
     if (k === 0) return [[]];
-    if (arr.length < k) return [];
+    if (arr.length === 0) return [];
     const [first, ...rest] = arr;
     return [
-        ...combinations(rest, k - 1).map(c => [first, ...c]),
-        ...combinations(rest, k),
+        ...combinationsWithRep(arr, k - 1).map(c => [first, ...c]), // allow repeat
+        ...combinationsWithRep(rest, k),                              // skip first
     ];
 }
 
@@ -180,9 +180,9 @@ function buildOptimalLadder(trades: SuggestedTrade[], type: 'Call' | 'Put', dvol
     const all = Array.from(unique.values()).sort((a, b) => b.apy - a.apy);
 
     const allCandidates: ReturnType<typeof scoreLadder>[] = [];
-    const perExpiryCap = Math.max(8, numLegs + 5);
+    const perExpiryCap = Math.min(5, numLegs + 2); // tight cap to control C(n+k-1,k) explosion
 
-    // ── Same-expiry combinations ───────────────────────────────
+    // ── Same-expiry combinations (with repetition allowed) ─────────────
     const byExpiry = new Map<string, SuggestedTrade[]>();
     for (const t of all) {
         const arr = byExpiry.get(t.expiry) || [];
@@ -191,16 +191,16 @@ function buildOptimalLadder(trades: SuggestedTrade[], type: 'Call' | 'Put', dvol
     }
     for (const [, expTrades] of Array.from(byExpiry.entries())) {
         const opts = expTrades.sort((a, b) => type === 'Call' ? a.strike - b.strike : b.strike - a.strike).slice(0, perExpiryCap);
-        if (opts.length < numLegs) continue;
-        for (const combo of combinations(opts, numLegs))
+        if (opts.length === 0) continue;
+        for (const combo of combinationsWithRep(opts, numLegs))
             allCandidates.push(scoreLadder(combo, dvolVal));
     }
 
-    // ── Cross-expiry combinations (top 15 by APR) ─────────────────
-    const top = all.slice(0, 15);
-    if (top.length >= numLegs) {
+    // ── Cross-expiry combinations (top 8 by APR, with repetition) ────────
+    const top = all.slice(0, 8);
+    if (top.length > 0) {
         const seen = new Set<string>();
-        for (const combo of combinations(top, numLegs)) {
+        for (const combo of combinationsWithRep(top, numLegs)) {
             const key = combo.map(x => `${x.strike}-${x.expiry}`).join('|');
             if (!seen.has(key)) { seen.add(key); allCandidates.push(scoreLadder(combo, dvolVal)); }
         }
@@ -253,7 +253,24 @@ export default function BTCCoveredYields({ darkMode }: { darkMode: boolean }) {
     const [dataAt, setDataAt] = useState<Date | null>(null);
     const [st, setSt] = useState<{ spot: Status; opt: Status; dvol: Status }>({ spot: 'load', opt: 'load', dvol: 'load' });
     const [maxPexCap, setMaxPexCap] = useState(40); // P(exercise) cap 0–100, default 40%
-    const [numLegs, setNumLegs] = useState(3);       // legs per ladder, default 3
+    const [numLegs, setNumLegs] = useState(0);       // 0 = Auto, 1-5 = fixed
+
+    // Compute best ladders — memoized; in Auto mode sweeps all leg counts 1–5
+    const { computedCall, computedPut } = useMemo(() => {
+        if (!trades.length) return { computedCall: null as ScoredLadder | null, computedPut: null as ScoredLadder | null };
+        const best = (type: 'Call' | 'Put'): ScoredLadder | null => {
+            if (numLegs === 0) {
+                let top: ScoredLadder | null = null;
+                for (let n = 1; n <= 5; n++) {
+                    const l = buildOptimalLadder(trades, type, dvol, n);
+                    if (l && (!top || l.score > top.score)) top = l;
+                }
+                return top;
+            }
+            return buildOptimalLadder(trades, type, dvol, numLegs);
+        };
+        return { computedCall: best('Call'), computedPut: best('Put') };
+    }, [trades, dvol, numLegs]);
 
     const tip = pinnedTip || hoverTip;
     const toggleLock = (k: string) => setLocked(p => { const n = new Set(p); n.has(k) ? n.delete(k) : n.add(k); return n; });
@@ -438,15 +455,15 @@ export default function BTCCoveredYields({ darkMode }: { darkMode: boolean }) {
                         ⚡ Top Yields
                     </span>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '12px', fontVariantNumeric: 'tabular-nums' }}>
-                        {/* Legs slider */}
+                        {/* Legs slider — 0 = Auto */}
                         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                             <span style={{ fontSize: 'var(--t-meta)', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>Legs</span>
                             <input
-                                type="range" min={1} max={5} step={1} value={numLegs}
+                                type="range" min={0} max={5} step={1} value={numLegs}
                                 onChange={e => setNumLegs(+e.target.value)}
                                 style={{ width: '60px', accentColor: 'var(--blue)', cursor: 'pointer', verticalAlign: 'middle' }}
                             />
-                            <span style={{ fontSize: 'var(--t-meta)', fontWeight: 700, minWidth: '12px', textAlign: 'right', color: 'var(--blue)' }}>{numLegs}</span>
+                            <span style={{ fontSize: 'var(--t-meta)', fontWeight: 700, minWidth: '28px', textAlign: 'right', color: numLegs === 0 ? 'var(--green)' : 'var(--blue)' }}>{numLegs === 0 ? 'Auto' : numLegs}</span>
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                             <span style={{ fontSize: 'var(--t-meta)', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>P(ex) cap</span>
@@ -472,8 +489,8 @@ export default function BTCCoveredYields({ darkMode }: { darkMode: boolean }) {
                 {!trades.length ? (
                     <div style={{ color: 'var(--text-muted)', fontSize: 'var(--t-data)' }}>{loading ? 'Loading...' : 'Scanning...'}</div>
                 ) : (() => {
-                    const callLadder = buildOptimalLadder(trades, 'Call', dvol, numLegs);
-                    const putLadder = buildOptimalLadder(trades, 'Put', dvol, numLegs);
+                    const callLadder = computedCall;
+                    const putLadder = computedPut;
                     // Only show strategies scoring ≥ 5.0
                     const filteredCall = callLadder && callLadder.score >= 5.0 ? callLadder : null;
                     const filteredPut = putLadder && putLadder.score >= 5.0 ? putLadder : null;
