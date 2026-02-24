@@ -306,6 +306,19 @@ export default function BTCCoveredYields({ darkMode }: { darkMode: boolean }) {
         return { computedCall: best('Call'), computedPut: best('Put') };
     }, [trades, dvol, numLegs, allowRep]);
 
+    // Set of keys for options that are currently recommended (used to highlight them in the matrix)
+    const recommendedKeys = useMemo(() => {
+        const s = new Set<string>();
+        const addL = (l: ScoredLadder | null) => {
+            if (l && l.score >= 5.0) {
+                l.legs.forEach(leg => s.add(`${leg.type === 'Call' ? 'C' : 'P'}-${leg.strike}-${leg.expiry}`));
+            }
+        };
+        addL(computedCall);
+        addL(computedPut);
+        return s;
+    }, [computedCall, computedPut]);
+
     const tip = pinnedTip || hoverTip;
     const toggleLock = (k: string) => setLocked(p => { const n = new Set(p); n.has(k) ? n.delete(k) : n.add(k); return n; });
 
@@ -401,11 +414,13 @@ export default function BTCCoveredYields({ darkMode }: { darkMode: boolean }) {
 
         const { apy, probExercise: pe, greeks } = d;
         const excluded = pe > maxPexCap / 100;
+        const isRec = recommendedKeys.has(k);
         const bg = isP
             ? 'rgba(37,99,235,0.2)'  /* blue highlight when pinned */
             : isL ? 'rgba(37,99,235,0.1)'
                 : excluded ? 'transparent'
-                    : heatColor(apy, type, darkMode);
+                    : isRec ? (type === 'C' ? 'rgba(234,179,8,0.25)' : 'rgba(34,197,94,0.25)')
+                        : heatColor(apy, type, darkMode);
         const det = { type: type === 'P' ? 'Put' : 'Call', strike, exp: exp.label, apy: apy.toFixed(1), dte: d.dte, markIv: d.markIv.toFixed(1), markPrice: d.markPrice, futuresPrice: d.futuresPrice, premiumUsd: d.premiumUsd, probExercise: pe, greeks };
 
         return (
@@ -416,18 +431,19 @@ export default function BTCCoveredYields({ darkMode }: { darkMode: boolean }) {
                 style={{
                     ...dataFont,
                     backgroundColor: bg,
-                    color: excluded ? 'var(--text-muted)' : 'var(--text-primary)',
+                    color: excluded ? 'var(--text-muted)' : (isRec ? (type === 'C' ? 'var(--yellow)' : 'var(--green)') : 'var(--text-primary)'),
                     opacity: excluded ? 0.6 : 1,
                     padding: '3px 5px',
                     cursor: 'pointer',
                     borderBottom: '1px solid var(--border-color)',
                     borderLeft: isP ? '2px solid var(--blue)' : 'none',
+                    boxShadow: isRec ? `inset 0 0 0 1.5px ${type === 'C' ? 'var(--yellow)' : 'var(--green)'}` : 'none',
                     position: 'relative',
                     transition: 'background 0.15s, opacity 0.15s',
                 }}>
-                <span style={{ fontWeight: !excluded && apy > 30 ? 600 : 400 }}>{apy.toFixed(1)}%</span>
-                <span style={{ fontSize: 'var(--t-micro)', color: 'var(--text-muted)', marginLeft: '2px' }}>{(pe * 100).toFixed(0)}%</span>
-                <span style={{ display: 'block', fontSize: 'var(--t-micro)', color: 'var(--text-muted)', lineHeight: '1' }}>{(d.premiumUsd / d.futuresPrice).toFixed(4)}฿</span>
+                <span style={{ fontWeight: !excluded && (isRec || apy > 30) ? 700 : 400 }}>{apy.toFixed(1)}%</span>
+                <span style={{ fontSize: 'var(--t-micro)', color: isRec ? 'inherit' : 'var(--text-muted)', marginLeft: '2px', opacity: isRec ? 0.8 : 1 }}>{(pe * 100).toFixed(0)}%</span>
+                <span style={{ display: 'block', fontSize: 'var(--t-micro)', color: isRec ? 'inherit' : 'var(--text-muted)', opacity: isRec ? 0.8 : 1, lineHeight: '1' }}>{(d.premiumUsd / d.futuresPrice).toFixed(4)}฿</span>
                 {(isL || isP) && <span style={{ position: 'absolute', top: 0, right: 1, fontSize: '0.5rem', color: 'var(--blue)' }}>●</span>}
             </td>
         );
