@@ -247,6 +247,7 @@ export default function BTCCoveredYields({ darkMode }: { darkMode: boolean }) {
     const [sugAt, setSugAt] = useState<Date | null>(null);
     const [dataAt, setDataAt] = useState<Date | null>(null);
     const [st, setSt] = useState<{ spot: Status; opt: Status; dvol: Status }>({ spot: 'load', opt: 'load', dvol: 'load' });
+    const [maxPexCap, setMaxPexCap] = useState(40); // P(exercise) cap 0–100, default 40%
 
     const tip = pinnedTip || hoverTip;
     const toggleLock = (k: string) => setLocked(p => { const n = new Set(p); n.has(k) ? n.delete(k) : n.add(k); return n; });
@@ -286,14 +287,14 @@ export default function BTCCoveredYields({ darkMode }: { darkMode: boolean }) {
                 const m = o.type === 'C' ? o.strike / o.futuresPrice : o.futuresPrice / o.strike;
                 if (m < 1 || m > 1.15) continue;
                 const pe = pEx(o.futuresPrice, o.strike, o.dte / 365, o.markIv / 100, o.type);
-                if (pe > 0.40) continue; // Only strategies with ≤ 40% P(exercise)
+                if (pe > maxPexCap / 100) continue; // Only strategies with ≤ maxPexCap% P(exercise)
                 t.push({ instrument: o.instrument, type: o.type === 'P' ? 'Put' : 'Call', strike: o.strike, expiry: o.expiry, dte: o.dte, apy, markIv: o.markIv, futuresPrice: o.futuresPrice, probExercise: pe, premiumUsd: o.markPrice * o.futuresPrice, moneyness: (m - 1) * 100 });
             }
             t.sort((a, b) => b.apy - a.apy);
             setTrades(t.slice(0, 8)); setSugAt(new Date());
         };
         compute(); const iv = setInterval(compute, 15000); return () => clearInterval(iv);
-    }, [opts]);
+    }, [opts, maxPexCap]);
 
     // ── Derived data (DTE ≥ 15) ───────────────────────────────────
     const { exps, putK, callK, cells } = useMemo(() => {
@@ -430,7 +431,20 @@ export default function BTCCoveredYields({ darkMode }: { darkMode: boolean }) {
                     <span style={{ fontSize: 'var(--t-title)', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--text-primary)' }}>
                         ⚡ Top Yields
                     </span>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontVariantNumeric: 'tabular-nums' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', fontVariantNumeric: 'tabular-nums' }}>
+                        {/* P(ex) cap slider */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <span style={{ fontSize: 'var(--t-meta)', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>P(ex) cap</span>
+                            <input
+                                type="range" min={0} max={100} step={1} value={maxPexCap}
+                                onChange={e => setMaxPexCap(+e.target.value)}
+                                style={{ width: '80px', accentColor: 'var(--blue)', cursor: 'pointer', verticalAlign: 'middle' }}
+                            />
+                            <span style={{
+                                fontSize: 'var(--t-meta)', fontWeight: 700, minWidth: '30px', textAlign: 'right',
+                                color: maxPexCap <= 25 ? 'var(--green)' : maxPexCap <= 50 ? 'var(--yellow)' : 'var(--red)'
+                            }}>{maxPexCap}%</span>
+                        </div>
                         {/* Pulsing live indicator */}
                         <span style={{ display: 'inline-block', width: '6px', height: '6px', borderRadius: '50%', backgroundColor: dataAt ? 'var(--green)' : 'var(--text-muted)', boxShadow: dataAt ? '0 0 4px var(--green)' : 'none' }} />
                         <span style={{ fontSize: 'var(--t-meta)', color: 'var(--text-muted)' }}>
