@@ -155,10 +155,21 @@ function rankLadders(candidates: ReturnType<typeof scoreLadder>[]): ScoredLadder
     }).sort((a, b) => b.score - a.score);
 }
 
-/* Combinatorial search: all valid 2-3 strike combos for an expiry */
-function buildOptimalLadder(trades: SuggestedTrade[], type: 'Call' | 'Put', dvolVal: number | null): ScoredLadder | null {
+/* Generic k-combination generator */
+function combinations<T>(arr: T[], k: number): T[][] {
+    if (k === 0) return [[]];
+    if (arr.length < k) return [];
+    const [first, ...rest] = arr;
+    return [
+        ...combinations(rest, k - 1).map(c => [first, ...c]),
+        ...combinations(rest, k),
+    ];
+}
+
+/* Combinatorial search: all valid numLegs-strike combos for an expiry */
+function buildOptimalLadder(trades: SuggestedTrade[], type: 'Call' | 'Put', dvolVal: number | null, numLegs: number): ScoredLadder | null {
     const ofType = trades.filter(t => t.type === type);
-    if (ofType.length < 3) return null;
+    if (ofType.length < numLegs) return null;
 
     // Deduplicate by strike+expiry
     const unique = new Map<string, SuggestedTrade>();
@@ -169,8 +180,9 @@ function buildOptimalLadder(trades: SuggestedTrade[], type: 'Call' | 'Put', dvol
     const all = Array.from(unique.values()).sort((a, b) => b.apy - a.apy);
 
     const allCandidates: ReturnType<typeof scoreLadder>[] = [];
+    const perExpiryCap = Math.max(8, numLegs + 5);
 
-    // ── Same-expiry combinations ──────────────────────────────────
+    // ── Same-expiry combinations ───────────────────────────────
     const byExpiry = new Map<string, SuggestedTrade[]>();
     for (const t of all) {
         const arr = byExpiry.get(t.expiry) || [];
@@ -178,27 +190,20 @@ function buildOptimalLadder(trades: SuggestedTrade[], type: 'Call' | 'Put', dvol
         byExpiry.set(t.expiry, arr);
     }
     for (const [, expTrades] of Array.from(byExpiry.entries())) {
-        const opts = expTrades.sort((a, b) => type === 'Call' ? a.strike - b.strike : b.strike - a.strike);
-        if (opts.length < 3) continue;
-        for (let i = 0; i < opts.length && i < 8; i++) {
-            for (let j = i + 1; j < opts.length && j < 8; j++) {
-                for (let k = j + 1; k < opts.length && k < 8; k++) {
-                    allCandidates.push(scoreLadder([opts[i], opts[j], opts[k]], dvolVal));
-                }
-            }
-        }
+        const opts = expTrades.sort((a, b) => type === 'Call' ? a.strike - b.strike : b.strike - a.strike).slice(0, perExpiryCap);
+        if (opts.length < numLegs) continue;
+        for (const combo of combinations(opts, numLegs))
+            allCandidates.push(scoreLadder(combo, dvolVal));
     }
 
-    // ── Cross-expiry combinations (top 10 by APR) ─────────────────
+    // ── Cross-expiry combinations (top 15 by APR) ─────────────────
     const top = all.slice(0, 15);
-    if (top.length >= 3) {
+    if (top.length >= numLegs) {
         const seen = new Set<string>();
-        for (let i = 0; i < top.length; i++)
-            for (let j = i + 1; j < top.length; j++)
-                for (let k = j + 1; k < top.length; k++) {
-                    const key = [i, j, k].map(x => `${top[x].strike}-${top[x].expiry}`).join('|');
-                    if (!seen.has(key)) { seen.add(key); allCandidates.push(scoreLadder([top[i], top[j], top[k]], dvolVal)); }
-                }
+        for (const combo of combinations(top, numLegs)) {
+            const key = combo.map(x => `${x.strike}-${x.expiry}`).join('|');
+            if (!seen.has(key)) { seen.add(key); allCandidates.push(scoreLadder(combo, dvolVal)); }
+        }
     }
 
     if (!allCandidates.length) return null;
@@ -248,6 +253,7 @@ export default function BTCCoveredYields({ darkMode }: { darkMode: boolean }) {
     const [dataAt, setDataAt] = useState<Date | null>(null);
     const [st, setSt] = useState<{ spot: Status; opt: Status; dvol: Status }>({ spot: 'load', opt: 'load', dvol: 'load' });
     const [maxPexCap, setMaxPexCap] = useState(40); // P(exercise) cap 0–100, default 40%
+    const [numLegs, setNumLegs] = useState(3);       // legs per ladder, default 3
 
     const tip = pinnedTip || hoverTip;
     const toggleLock = (k: string) => setLocked(p => { const n = new Set(p); n.has(k) ? n.delete(k) : n.add(k); return n; });
@@ -291,7 +297,7 @@ export default function BTCCoveredYields({ darkMode }: { darkMode: boolean }) {
                 t.push({ instrument: o.instrument, type: o.type === 'P' ? 'Put' : 'Call', strike: o.strike, expiry: o.expiry, dte: o.dte, apy, markIv: o.markIv, futuresPrice: o.futuresPrice, probExercise: pe, premiumUsd: o.markPrice * o.futuresPrice, moneyness: (m - 1) * 100 });
             }
             t.sort((a, b) => b.apy - a.apy);
-            setTrades(t.slice(0, 8)); setSugAt(new Date());
+            setTrades(t.slice(0, Math.max(15, numLegs * 4))); setSugAt(new Date());
         };
         compute(); const iv = setInterval(compute, 15000); return () => clearInterval(iv);
     }, [opts, maxPexCap]);
@@ -432,7 +438,16 @@ export default function BTCCoveredYields({ darkMode }: { darkMode: boolean }) {
                         ⚡ Top Yields
                     </span>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '12px', fontVariantNumeric: 'tabular-nums' }}>
-                        {/* P(ex) cap slider */}
+                        {/* Legs slider */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <span style={{ fontSize: 'var(--t-meta)', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>Legs</span>
+                            <input
+                                type="range" min={1} max={5} step={1} value={numLegs}
+                                onChange={e => setNumLegs(+e.target.value)}
+                                style={{ width: '60px', accentColor: 'var(--blue)', cursor: 'pointer', verticalAlign: 'middle' }}
+                            />
+                            <span style={{ fontSize: 'var(--t-meta)', fontWeight: 700, minWidth: '12px', textAlign: 'right', color: 'var(--blue)' }}>{numLegs}</span>
+                        </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                             <span style={{ fontSize: 'var(--t-meta)', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>P(ex) cap</span>
                             <input
@@ -457,8 +472,8 @@ export default function BTCCoveredYields({ darkMode }: { darkMode: boolean }) {
                 {!trades.length ? (
                     <div style={{ color: 'var(--text-muted)', fontSize: 'var(--t-data)' }}>{loading ? 'Loading...' : 'Scanning...'}</div>
                 ) : (() => {
-                    const callLadder = buildOptimalLadder(trades, 'Call', dvol);
-                    const putLadder = buildOptimalLadder(trades, 'Put', dvol);
+                    const callLadder = buildOptimalLadder(trades, 'Call', dvol, numLegs);
+                    const putLadder = buildOptimalLadder(trades, 'Put', dvol, numLegs);
                     // Only show strategies scoring ≥ 5.0
                     const filteredCall = callLadder && callLadder.score >= 5.0 ? callLadder : null;
                     const filteredPut = putLadder && putLadder.score >= 5.0 ? putLadder : null;
@@ -520,8 +535,8 @@ export default function BTCCoveredYields({ darkMode }: { darkMode: boolean }) {
                                 <div style={{ padding: '4px 8px', borderTop: '1px solid var(--border-color)', fontSize: 'var(--t-meta)', color: 'var(--text-muted)', backgroundColor: darkMode ? 'rgba(15,23,42,0.5)' : 'rgba(241,245,249,0.5)', lineHeight: '1.45' }}>
                                     {(() => {
                                         const capPerLeg = isCall ? (spot || legs[0].futuresPrice) : legs.reduce((s, l) => s + l.strike, 0) / legs.length;
-                                        const btcPerLeg = totalPrem / legs.length / (spot || legs[0].futuresPrice);
-                                        return <><span style={{ color: 'var(--text-secondary)' }}>Capital req:</span> <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>${totalCost.toLocaleString('en-US', { maximumFractionDigits: 0 })}</span> <span style={{ color: 'var(--text-muted)', fontSize: 'var(--t-micro)' }}>(33.33% · ${capPerLeg.toLocaleString('en-US', { maximumFractionDigits: 0 })}/leg)</span> − ${totalPrem.toFixed(0)} prem = <span style={{ fontWeight: 600 }}>${netCost.toLocaleString('en-US', { maximumFractionDigits: 0 })}</span> net · <span style={{ color: accent, fontWeight: 600 }}>{yieldOnCapital.toFixed(1)}% yield</span></>;
+                                        const pctPerLeg = (100 / legs.length).toFixed(1);
+                                        return <><span style={{ color: 'var(--text-secondary)' }}>Capital req:</span> <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>${totalCost.toLocaleString('en-US', { maximumFractionDigits: 0 })}</span> <span style={{ color: 'var(--text-muted)', fontSize: 'var(--t-micro)' }}>({pctPerLeg}% · ${capPerLeg.toLocaleString('en-US', { maximumFractionDigits: 0 })}/leg)</span> − ${totalPrem.toFixed(0)} prem = <span style={{ fontWeight: 600 }}>${netCost.toLocaleString('en-US', { maximumFractionDigits: 0 })}</span> net · <span style={{ color: accent, fontWeight: 600 }}>{yieldOnCapital.toFixed(1)}% yield</span></>;
                                     })()}
                                     <br />
                                     <Tip text="Expected Value: risk-adjusted profit = premium × P(expire OTM) minus expected loss if assigned. Higher = better edge.">EV</Tip>: ${ev.toFixed(0)} (${evAnnual.toFixed(0)}/yr) · <Tip text="Probability that at least one option gets exercised/assigned. Lower = safer strategy.">P(any ex)</Tip>: <span style={{ color: accent, fontWeight: 600 }}>{(probAnyEx * 100).toFixed(0)}%</span> · <Tip text="Theta: premium income earned per day from time decay. Higher = more daily income.">θ</Tip>: ${thetaEff.toFixed(0)}/d
