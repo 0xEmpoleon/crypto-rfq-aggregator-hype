@@ -259,8 +259,8 @@ export default function BTCCoveredYields({ darkMode }: { darkMode: boolean }) {
     const [hoverTip, setHoverTip] = useState<{ d: any; x: number; y: number } | null>(null);
     const [pinnedTip, setPinnedTip] = useState<{ d: any; x: number; y: number } | null>(null);
     const [pinnedKey, setPinnedKey] = useState<string | null>(null);
-    const [spot, setSpot] = useState<number | null>(null);
-    const [dvol, setDvol] = useState<number | null>(null);
+    const [spot, setSpot] = useState<{ v: number; c: number; cp: number } | null>(null);
+    const [dvol, setDvol] = useState<{ v: number; cp: number } | null>(null);
     const [opts, setOpts] = useState<ParsedOption[]>([]);
     const [loading, setLoading] = useState(true);
     const [trades, setTrades] = useState<SuggestedTrade[]>([]);
@@ -279,12 +279,12 @@ export default function BTCCoveredYields({ darkMode }: { darkMode: boolean }) {
             if (numLegs === 0) {
                 let top: ScoredLadder | null = null;
                 for (let n = 1; n <= 5; n++) {
-                    const l = buildOptimalLadder(trades, type, dvol, n, allowRep);
+                    const l = buildOptimalLadder(trades, type, dvol?.v || null, n, allowRep);
                     if (l && (!top || l.score > top.score)) top = l;
                 }
                 return top;
             }
-            return buildOptimalLadder(trades, type, dvol, numLegs, allowRep);
+            return buildOptimalLadder(trades, type, dvol?.v || null, numLegs, allowRep);
         };
         return { computedCall: best('Call'), computedPut: best('Put') };
     }, [trades, dvol, numLegs, allowRep]);
@@ -296,8 +296,8 @@ export default function BTCCoveredYields({ darkMode }: { darkMode: boolean }) {
     useEffect(() => {
         const go = async () => {
             const ns = { spot: 'load' as Status, opt: 'load' as Status, dvol: 'load' as Status };
-            try { const r = await fetch('https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT'); const d = await r.json(); const v = +d.price; if (v > 0) { setSpot(v); ns.spot = 'ok'; } else ns.spot = 'err'; } catch { ns.spot = 'err'; }
-            try { const now = Date.now(); const r = await fetch(`https://www.deribit.com/api/v2/public/get_volatility_index_data?currency=BTC&resolution=1&start_timestamp=${now - 120000}&end_timestamp=${now}`); const d = await r.json(); if (d.result?.data?.length) { setDvol(d.result.data.at(-1)[4] ?? d.result.data.at(-1)[1]); ns.dvol = 'ok'; } else ns.dvol = 'err'; } catch { ns.dvol = 'err'; }
+            try { const r = await fetch('https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT'); const d = await r.json(); const v = +d.lastPrice; if (v > 0) { setSpot({ v, c: +d.priceChange, cp: +d.priceChangePercent }); ns.spot = 'ok'; } else ns.spot = 'err'; } catch { ns.spot = 'err'; }
+            try { const now = Date.now(); const r = await fetch(`https://www.deribit.com/api/v2/public/get_volatility_index_data?currency=BTC&resolution=1&start_timestamp=${now - 86520000}&end_timestamp=${now}`); const d = await r.json(); if (d.result?.data?.length > 0) { const a = d.result.data; const l = a[a.length - 1][4] ?? a[a.length - 1][1]; const f = a[0][1]; setDvol({ v: l, cp: ((l - f) / f) * 100 }); ns.dvol = 'ok'; } else ns.dvol = 'err'; } catch { ns.dvol = 'err'; }
             try {
                 const r = await fetch('https://www.deribit.com/api/v2/public/get_book_summary_by_currency?currency=BTC&kind=option');
                 const d = await r.json();
@@ -343,7 +343,7 @@ export default function BTCCoveredYields({ darkMode }: { darkMode: boolean }) {
         const em = new Map<string, { ts: number; dte: number; fp: number }>();
         for (const o of f) if (!em.has(o.expiry)) em.set(o.expiry, { ts: o.expiryTs, dte: o.dte, fp: o.futuresPrice });
         const exps = Array.from(em.entries()).map(([l, d]) => ({ label: l, ...d })).sort((a, b) => a.ts - b.ts);
-        const ref = exps[0]?.fp || (spot || 60000);
+        const ref = exps[0]?.fp || (spot?.v || 60000);
         const pS = new Set<number>(), cS = new Set<number>();
         for (const o of f) { if (o.type === 'P' && o.strike <= ref) pS.add(o.strike); if (o.type === 'C' && o.strike >= ref) cS.add(o.strike); }
         const putK = Array.from(pS).sort((a, b) => b - a).slice(0, 10);
@@ -453,13 +453,19 @@ export default function BTCCoveredYields({ darkMode }: { darkMode: boolean }) {
                 <Dot s={st.dvol} label="DVOL" />
                 <div style={{ marginLeft: 'auto', display: 'flex', gap: '12px', alignItems: 'center' }}>
                     {spot !== null && (
-                        <span style={{ fontSize: 'var(--t-data)', fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: 'var(--text-primary)' }}>
-                            BTC <span style={{ color: 'var(--green)' }}>${spot.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: 'var(--t-data)', fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: 'var(--text-primary)' }}>
+                            BTC <span>${spot.v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                            <span style={{ fontSize: 'var(--t-meta)', fontWeight: 500, color: spot.c >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                                {spot.c >= 0 ? '↗' : '↘'} {Math.abs(spot.cp).toFixed(2)}%
+                            </span>
                         </span>
                     )}
                     {dvol !== null && (
-                        <span style={{ fontSize: 'var(--t-data)', fontVariantNumeric: 'tabular-nums', color: 'var(--text-secondary)' }}>
-                            DVOL <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{dvol.toFixed(1)}</span>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: 'var(--t-data)', fontVariantNumeric: 'tabular-nums', color: 'var(--text-secondary)' }}>
+                            DVOL <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{dvol.v.toFixed(1)}</span>
+                            <span style={{ fontSize: 'var(--t-meta)', fontWeight: 500, color: dvol.cp >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                                {dvol.cp >= 0 ? '↗' : '↘'} {Math.abs(dvol.cp).toFixed(1)}%
+                            </span>
                         </span>
                     )}
                 </div>
@@ -530,14 +536,14 @@ export default function BTCCoveredYields({ darkMode }: { darkMode: boolean }) {
                         const dir = isCall ? 'below' : 'above';
                         const scoreColor = score >= 7 ? 'var(--green)' : score >= 4 ? 'var(--yellow)' : 'var(--red)';
                         const totalCost = isCall
-                            ? (spot || legs[0].futuresPrice) * legs.length
+                            ? (spot?.v || legs[0].futuresPrice) * legs.length
                             : legs.reduce((s, l) => s + l.strike, 0);
                         const netCost = totalCost - totalPrem;
                         // Yield on capital: compute per leg (each leg's own DTE) then average.
                         // For CC: capital per leg = spot price of BTC (1 BTC per leg)
                         // For CSP: capital per leg = strike (cash to secure)
                         const capitalPerLeg = isCall
-                            ? (spot || legs[0].futuresPrice)
+                            ? (spot?.v || legs[0].futuresPrice)
                             : null; // per-leg for CSP defined below
                         const yieldOnCapital = legs.reduce((sum, l) => {
                             const cap = isCall ? capitalPerLeg! : l.strike;
@@ -576,7 +582,7 @@ export default function BTCCoveredYields({ darkMode }: { darkMode: boolean }) {
                                     {(() => {
                                         // Scale all costs to 1 BTC total notional (so 1/N BTC per leg)
                                         const scaledTotalCost = isCall
-                                            ? (spot || legs[0].futuresPrice)
+                                            ? (spot?.v || legs[0].futuresPrice)
                                             : legs.reduce((s, l) => s + l.strike, 0) / legs.length;
                                         const scaledTotalPrem = totalPrem / legs.length;
                                         const scaledNetCost = scaledTotalCost - scaledTotalPrem;
@@ -615,7 +621,7 @@ export default function BTCCoveredYields({ darkMode }: { darkMode: boolean }) {
                         <span style={{ fontSize: 'var(--t-meta)', fontWeight: 400, color: 'var(--text-muted)' }}>DTE ≥ 15 · 1฿ notional · click to pin</span>
                     </span>
                     <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600, fontSize: 'var(--t-data)' }}>
-                        Spot: <span style={{ color: 'var(--blue)' }}>{spot ? `$${spot.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '--'}</span>
+                        Spot: <span style={{ color: 'var(--blue)' }}>{spot ? `$${spot.v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '--'}</span>
                     </span>
                 </div>
 
