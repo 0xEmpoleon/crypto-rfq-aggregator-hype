@@ -519,7 +519,7 @@ export default function BTCCoveredYields({ darkMode }: { darkMode: boolean }) {
                                         const avgDte = legs.reduce((s, l) => s + l.dte, 0) / legs.length;
                                         const annualBtc = totalPremBtc * (365 / avgDte);
                                         const perLegBtc = totalPremBtc / legs.length;
-                                        return <><span style={{ color: 'var(--text-secondary)' }}>OTM → </span><span style={{ color: accent, fontWeight: 600 }}>${totalPrem.toFixed(0)} · {totalPremBtc.toFixed(4)}฿</span> · {avgApy.toFixed(0)}% APR · {annualBtc.toFixed(4)}฿/yr <span style={{ color: 'var(--text-muted)', fontSize: 'var(--t-micro)' }}>({perLegBtc.toFixed(4)}฿/leg)</span></>;
+                                        return <><span style={{ color: 'var(--text-muted)' }}>BTC stays {dir} all strikes by {expiryLabel} → keep </span><span style={{ color: accent, fontWeight: 600 }}>${totalPrem.toFixed(0)} · {totalPremBtc.toFixed(4)}฿</span><span style={{ color: 'var(--text-muted)' }}> · {avgApy.toFixed(0)}% APR · {annualBtc.toFixed(4)}฿/yr · {perLegBtc.toFixed(4)}฿/leg</span></>;
                                     })()}
                                 </div>
                             </div>
