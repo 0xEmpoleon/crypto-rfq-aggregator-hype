@@ -297,7 +297,7 @@ export default function BTCCoveredYields({ darkMode }: { darkMode: boolean }) {
         const go = async () => {
             const ns = { spot: 'load' as Status, opt: 'load' as Status, dvol: 'load' as Status };
             try { const r = await fetch('https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT'); const d = await r.json(); const v = +d.lastPrice; if (v > 0) { setSpot({ v, c: +d.priceChange, cp: +d.priceChangePercent }); ns.spot = 'ok'; } else ns.spot = 'err'; } catch { ns.spot = 'err'; }
-            try { const now = Date.now(); const r = await fetch(`https://www.deribit.com/api/v2/public/get_volatility_index_data?currency=BTC&resolution=1&start_timestamp=${now - 86520000}&end_timestamp=${now}`); const d = await r.json(); if (d.result?.data?.length > 0) { const a = d.result.data; const l = a[a.length - 1][4] ?? a[a.length - 1][1]; const f = a[0][1]; setDvol({ v: l, cp: ((l - f) / f) * 100 }); ns.dvol = 'ok'; } else ns.dvol = 'err'; } catch { ns.dvol = 'err'; }
+            try { const now = Date.now(); const r = await fetch(`https://www.deribit.com/api/v2/public/get_volatility_index_data?currency=BTC&resolution=3600&start_timestamp=${now - 86520000}&end_timestamp=${now}`); const d = await r.json(); if (d.result?.data?.length > 0) { const a = d.result.data; const l = a[a.length - 1][4] ?? a[a.length - 1][1]; const f = a[0][1]; setDvol({ v: l, cp: ((l - f) / f) * 100 }); ns.dvol = 'ok'; } else ns.dvol = 'err'; } catch { ns.dvol = 'err'; }
             try {
                 const r = await fetch('https://www.deribit.com/api/v2/public/get_book_summary_by_currency?currency=BTC&kind=option');
                 const d = await r.json();
