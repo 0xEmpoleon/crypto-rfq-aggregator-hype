@@ -83,7 +83,7 @@ function conditionalTailLoss(S: number, K: number, T: number, sigma: number, typ
 /* Score a ladder combination — mixed-expiry safe (uses per-leg dte/fp) */
 function scoreLadder(legs: SuggestedTrade[], dvolVal: number | null): Omit<ScoredLadder, 'topFactor'> & { factors: number[] } {
     const n = legs.length;
-    const dv = dvolVal || 60;
+    const dv = dvolVal || 57;
 
     let totalEv = 0, totalRisk = 0, totalPrem = 0, totalApy = 0, volEdgeSum = 0, thetaSum = 0;
 
@@ -93,7 +93,7 @@ function scoreLadder(legs: SuggestedTrade[], dvolVal: number | null): Omit<Score
         const pITM = l.probExercise;
         const tailLoss = conditionalTailLoss(l.futuresPrice, l.strike, T, sigma, l.type === 'Call' ? 'C' : 'P');
         const ev = l.premiumUsd * (1 - pITM) - tailLoss * pITM;
-        const maxLoss = l.type === 'Put' ? Math.max(0, l.strike * 0.15) : l.futuresPrice * sigma * 2 * Math.sqrt(T);
+        const maxLoss = l.type === 'Put' ? Math.max(0, tailLoss) : l.futuresPrice * sigma * 2 * Math.sqrt(T);
         totalEv += ev;
         totalRisk += pITM * maxLoss;
         totalPrem += l.premiumUsd;
@@ -115,7 +115,7 @@ function scoreLadder(legs: SuggestedTrade[], dvolVal: number | null): Omit<Score
     const kelly = totalPrem > 0 ? Math.max(0, probAllOTM - maxPex * avgLoss / totalPrem) : 0;
     const strikes = legs.map(l => l.strike);
     const diversification = (Math.max(...strikes) - Math.min(...strikes)) / fp0;
-    const factors = [evAnnual, volEdge, riskReturn, thetaEff, kelly, diversification];
+    const factors = [evAnnual, Math.max(0, volEdge), riskReturn, thetaEff, kelly, diversification];
 
     return { legs, score: 0, ev: totalEv, evAnnual, volEdge, thetaEff, riskReturn, kelly, diversification, probAllOTM, totalPrem, avgApy, factors };
 }
@@ -190,7 +190,7 @@ function buildOptimalLadder(trades: SuggestedTrade[], type: 'Call' | 'Put', dvol
     }
 
     // ── Cross-expiry combinations (top 10 by APR) ─────────────────
-    const top = all.slice(0, 10);
+    const top = all.slice(0, 15);
     if (top.length >= 3) {
         const seen = new Set<string>();
         for (let i = 0; i < top.length; i++)
@@ -286,7 +286,7 @@ export default function BTCCoveredYields({ darkMode }: { darkMode: boolean }) {
                 const m = o.type === 'C' ? o.strike / o.futuresPrice : o.futuresPrice / o.strike;
                 if (m < 1 || m > 1.15) continue;
                 const pe = pEx(o.futuresPrice, o.strike, o.dte / 365, o.markIv / 100, o.type);
-                if (pe > 0.40) continue; // Only strategies with ≤ 40% P(exercise)
+                if (pe > 0.30) continue; // Only strategies with ≤ 30% P(exercise)
                 t.push({ instrument: o.instrument, type: o.type === 'P' ? 'Put' : 'Call', strike: o.strike, expiry: o.expiry, dte: o.dte, apy, markIv: o.markIv, futuresPrice: o.futuresPrice, probExercise: pe, premiumUsd: o.markPrice * o.futuresPrice, moneyness: (m - 1) * 100 });
             }
             t.sort((a, b) => b.apy - a.apy);
