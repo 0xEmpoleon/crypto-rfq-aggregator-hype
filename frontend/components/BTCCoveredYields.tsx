@@ -400,9 +400,12 @@ export default function BTCCoveredYields({ darkMode }: { darkMode: boolean }) {
         );
 
         const { apy, probExercise: pe, greeks } = d;
+        const excluded = pe > maxPexCap / 100;
         const bg = isP
             ? 'rgba(37,99,235,0.2)'  /* blue highlight when pinned */
-            : isL ? 'rgba(37,99,235,0.1)' : heatColor(apy, type, darkMode);
+            : isL ? 'rgba(37,99,235,0.1)'
+                : excluded ? 'transparent'
+                    : heatColor(apy, type, darkMode);
         const det = { type: type === 'P' ? 'Put' : 'Call', strike, exp: exp.label, apy: apy.toFixed(1), dte: d.dte, markIv: d.markIv.toFixed(1), markPrice: d.markPrice, futuresPrice: d.futuresPrice, premiumUsd: d.premiumUsd, probExercise: pe, greeks };
 
         return (
@@ -413,15 +416,16 @@ export default function BTCCoveredYields({ darkMode }: { darkMode: boolean }) {
                 style={{
                     ...dataFont,
                     backgroundColor: bg,
-                    color: 'var(--text-primary)',
+                    color: excluded ? 'var(--text-muted)' : 'var(--text-primary)',
+                    opacity: excluded ? 0.6 : 1,
                     padding: '3px 5px',
                     cursor: 'pointer',
                     borderBottom: '1px solid var(--border-color)',
                     borderLeft: isP ? '2px solid var(--blue)' : 'none',
                     position: 'relative',
-                    transition: 'background 0.1s',
+                    transition: 'background 0.15s, opacity 0.15s',
                 }}>
-                <span style={{ fontWeight: apy > 30 ? 600 : 400 }}>{apy.toFixed(1)}%</span>
+                <span style={{ fontWeight: !excluded && apy > 30 ? 600 : 400 }}>{apy.toFixed(1)}%</span>
                 <span style={{ fontSize: 'var(--t-micro)', color: 'var(--text-muted)', marginLeft: '2px' }}>{(pe * 100).toFixed(0)}%</span>
                 <span style={{ display: 'block', fontSize: 'var(--t-micro)', color: 'var(--text-muted)', lineHeight: '1' }}>{(d.premiumUsd / d.futuresPrice).toFixed(4)}฿</span>
                 {(isL || isP) && <span style={{ position: 'absolute', top: 0, right: 1, fontSize: '0.5rem', color: 'var(--blue)' }}>●</span>}
