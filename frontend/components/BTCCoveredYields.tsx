@@ -504,7 +504,11 @@ export default function BTCCoveredYields({ darkMode }: { darkMode: boolean }) {
                                 </div>
                                 {/* Cost + Explainer with hover callouts */}
                                 <div style={{ padding: '4px 8px', borderTop: '1px solid var(--border-color)', fontSize: 'var(--t-meta)', color: 'var(--text-muted)', backgroundColor: darkMode ? 'rgba(15,23,42,0.5)' : 'rgba(241,245,249,0.5)', lineHeight: '1.45' }}>
-                                    <span style={{ color: 'var(--text-secondary)' }}>Capital req (no lev):</span> <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>${totalCost.toLocaleString('en-US', { maximumFractionDigits: 0 })}</span> − ${totalPrem.toFixed(0)} prem = <span style={{ fontWeight: 600 }}>${netCost.toLocaleString('en-US', { maximumFractionDigits: 0 })}</span> net · <span style={{ color: accent, fontWeight: 600 }}>{yieldOnCapital.toFixed(1)}% yield on capital</span>
+                                    {(() => {
+                                        const capPerLeg = isCall ? (spot || legs[0].futuresPrice) : legs.reduce((s, l) => s + l.strike, 0) / legs.length;
+                                        const btcPerLeg = totalPrem / legs.length / (spot || legs[0].futuresPrice);
+                                        return <><span style={{ color: 'var(--text-secondary)' }}>Capital req:</span> <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>${totalCost.toLocaleString('en-US', { maximumFractionDigits: 0 })}</span> <span style={{ color: 'var(--text-muted)', fontSize: 'var(--t-micro)' }}>(33.33% · ${capPerLeg.toLocaleString('en-US', { maximumFractionDigits: 0 })}/leg)</span> − ${totalPrem.toFixed(0)} prem = <span style={{ fontWeight: 600 }}>${netCost.toLocaleString('en-US', { maximumFractionDigits: 0 })}</span> net · <span style={{ color: accent, fontWeight: 600 }}>{yieldOnCapital.toFixed(1)}% yield</span></>;
+                                    })()}
                                     <br />
                                     <Tip text="Expected Value: risk-adjusted profit = premium × P(expire OTM) minus expected loss if assigned. Higher = better edge.">EV</Tip>: ${ev.toFixed(0)} (${evAnnual.toFixed(0)}/yr) · <Tip text="Probability that at least one option gets exercised/assigned. Lower = safer strategy.">P(any ex)</Tip>: <span style={{ color: accent, fontWeight: 600 }}>{(probAnyEx * 100).toFixed(0)}%</span> · <Tip text="Theta: premium income earned per day from time decay. Higher = more daily income.">θ</Tip>: ${thetaEff.toFixed(0)}/d
                                     <br />
@@ -514,7 +518,8 @@ export default function BTCCoveredYields({ darkMode }: { darkMode: boolean }) {
                                         const totalPremBtc = legs.reduce((s, l) => s + l.premiumUsd / l.futuresPrice, 0);
                                         const avgDte = legs.reduce((s, l) => s + l.dte, 0) / legs.length;
                                         const annualBtc = totalPremBtc * (365 / avgDte);
-                                        return <><span style={{ color: 'var(--text-secondary)' }}>OTM → </span><span style={{ color: accent, fontWeight: 600 }}>${totalPrem.toFixed(0)} · {totalPremBtc.toFixed(4)}฿</span> · {avgApy.toFixed(0)}% APR · {annualBtc.toFixed(4)}฿/yr</>;
+                                        const perLegBtc = totalPremBtc / legs.length;
+                                        return <><span style={{ color: 'var(--text-secondary)' }}>OTM → </span><span style={{ color: accent, fontWeight: 600 }}>${totalPrem.toFixed(0)} · {totalPremBtc.toFixed(4)}฿</span> · {avgApy.toFixed(0)}% APR · {annualBtc.toFixed(4)}฿/yr <span style={{ color: 'var(--text-muted)', fontSize: 'var(--t-micro)' }}>({perLegBtc.toFixed(4)}฿/leg)</span></>;
                                     })()}
                                 </div>
                             </div>
@@ -535,7 +540,7 @@ export default function BTCCoveredYields({ darkMode }: { darkMode: boolean }) {
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px', flex: '0 0 auto' }}>
                     <span style={{ fontSize: 'var(--t-title)', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px' }}>
                         Covered Yield Matrix
-                        <span style={{ fontSize: 'var(--t-meta)', fontWeight: 400, color: 'var(--text-muted)' }}>DTE ≥ 15 · click to pin</span>
+                        <span style={{ fontSize: 'var(--t-meta)', fontWeight: 400, color: 'var(--text-muted)' }}>DTE ≥ 15 · 1฿ notional · click to pin</span>
                     </span>
                     <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600, fontSize: 'var(--t-data)' }}>
                         Spot: <span style={{ color: 'var(--blue)' }}>{spot ? `$${spot.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '--'}</span>
@@ -555,7 +560,7 @@ export default function BTCCoveredYields({ darkMode }: { darkMode: boolean }) {
                             <strong style={{ display: 'block', borderBottom: '1px solid var(--border-color)', paddingBottom: '3px', marginBottom: '4px', fontSize: 'var(--t-label)', textTransform: 'uppercase', letterSpacing: '0.05em', color: tip.d.type === 'Put' ? 'var(--green)' : 'var(--yellow)' }}>
                                 {tip.d.type === 'Put' ? 'Cash Secured Put' : 'Covered Call'}
                             </strong>
-                            {[['Strike', `$${tip.d.strike.toLocaleString()}`], ['Expiry', tip.d.exp], ['DTE', `${tip.d.dte}d`], ['Futures', `$${tip.d.futuresPrice.toLocaleString('en-US', { maximumFractionDigits: 0 })}`], ['IV', `${tip.d.markIv}%`], ['Prem', `$${tip.d.premiumUsd.toFixed(2)}`], ['P(ex)', `${(tip.d.probExercise * 100).toFixed(1)}%`]].map(([l, v]) => (
+                            {[['Strike', `$${tip.d.strike.toLocaleString()}`], ['Expiry', tip.d.exp], ['DTE', `${tip.d.dte}d`], ['Futures', `$${tip.d.futuresPrice.toLocaleString('en-US', { maximumFractionDigits: 0 })}`], ['IV', `${tip.d.markIv}%`], ['Prem (1฿)', `$${tip.d.premiumUsd.toFixed(2)} · ${(tip.d.premiumUsd / tip.d.futuresPrice).toFixed(4)}฿`], ['P(ex)', `${(tip.d.probExercise * 100).toFixed(1)}%`]].map(([l, v]) => (
                                 <div key={l} style={{ display: 'flex', justifyContent: 'space-between', lineHeight: '1.5', fontVariantNumeric: 'tabular-nums' }}>
                                     <span style={{ color: 'var(--text-muted)' }}>{l}</span><span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{v}</span>
                                 </div>
