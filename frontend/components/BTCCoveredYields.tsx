@@ -20,25 +20,28 @@ function normCdf(x: number): number {
     return 0.5 * (1 + sign * (1 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * Math.exp(-x * x / 2)));
 }
 
-function pEx(S: number, K: number, T: number, s: number, type: 'C' | 'P'): number {
+function pEx(S: number, K: number, T: number, s: number, type: 'C' | 'P', r: number = 0): number {
     if (T <= 0 || s <= 0) return 0;
-    const d2 = (Math.log(S / K) - 0.5 * s * s * T) / (s * Math.sqrt(T));
+    const d2 = (Math.log(S / K) + (r - 0.5 * s * s) * T) / (s * Math.sqrt(T));
     return type === 'C' ? normCdf(d2) : normCdf(-d2);
 }
 
-function bsGreeks(S: number, K: number, T: number, sigma: number, type: 'C' | 'P') {
+function bsGreeks(S: number, K: number, T: number, sigma: number, type: 'C' | 'P', r: number = 0) {
     if (T <= 0 || sigma <= 0) return { delta: 0, gamma: 0, theta: 0, vega: 0 };
     const sqrtT = Math.sqrt(T);
-    const d1 = (Math.log(S / K) + 0.5 * sigma * sigma * T) / (sigma * sqrtT);
+    const d1 = (Math.log(S / K) + (r + 0.5 * sigma * sigma) * T) / (sigma * sqrtT);
+    const d2 = d1 - sigma * sqrtT;
     const normPdf = (x: number) => Math.exp(-0.5 * x * x) / Math.sqrt(2 * Math.PI);
     const Nd1 = normCdf(d1);
     const nPdfd1 = normPdf(d1);
+    const ert = Math.exp(-r * T);
 
-    // r=0 assumptions for crypto
     const delta = type === 'C' ? Nd1 : Nd1 - 1;
     const gamma = nPdfd1 / (S * sigma * sqrtT);
     const vega = S * nPdfd1 * sqrtT / 100; // per 1% change in IV
-    const theta = -(S * sigma * nPdfd1) / (2 * sqrtT) / 365; // per day
+    const term1 = -(S * sigma * nPdfd1) / (2 * sqrtT);
+    let theta = type === 'C' ? term1 - r * K * ert * normCdf(d2) : term1 + r * K * ert * normCdf(-d2);
+    theta = theta / 365; // per day
 
     return { delta, gamma, theta, vega };
 }
@@ -47,7 +50,7 @@ function expiryToDate(e: string): Date {
     const M: Record<string, number> = { JAN: 0, FEB: 1, MAR: 2, APR: 3, MAY: 4, JUN: 5, JUL: 6, AUG: 7, SEP: 8, OCT: 9, NOV: 10, DEC: 11 };
     return new Date(Date.UTC(2000 + +e.slice(5), M[e.slice(2, 5)] ?? 0, +e.slice(0, 2), 8));
 }
-const putApy = (mp: number, fp: number, k: number, d: number) => d > 0 && k > 0 ? (mp * fp / k) * (365 / d) * 100 : 0;
+const putApy = (mp: number, fp: number, k: number, d: number, r: number = 0) => d > 0 && k > 0 ? ((mp * fp / k) * (365 / d) * 100) + (r * 100) : 0;
 const callApy = (mp: number, d: number) => d > 0 ? mp * (365 / d) * 100 : 0;
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -78,27 +81,26 @@ interface ScoredLadder {
 }
 
 /* Conditional tail loss — expected loss given assignment (Black-Scholes) */
-function conditionalTailLoss(S: number, K: number, T: number, sigma: number, type: 'C' | 'P'): number {
+function conditionalTailLoss(S: number, K: number, T: number, sigma: number, type: 'C' | 'P', r: number = 0): number {
     if (T <= 0 || sigma <= 0) return 0;
     const sqrtT = Math.sqrt(T);
-    const d1 = (Math.log(S / K) + 0.5 * sigma * sigma * T) / (sigma * sqrtT);
+    const d1 = (Math.log(S / K) + (r + 0.5 * sigma * sigma) * T) / (sigma * sqrtT);
     const d2 = d1 - sigma * sqrtT;
+    const ert = Math.exp(-r * T);
 
     if (type === 'P') {
-        // E[loss | assigned] = K × N(-d2) - S × N(-d1) for puts
         const Nd2 = normCdf(-d2);
         if (Nd2 < 1e-10) return 0;
-        return Math.max(0, K * normCdf(-d2) - S * normCdf(-d1));
+        return Math.max(0, K * ert * Nd2 - S * normCdf(-d1));
     } else {
-        // E[loss | assigned] = S × N(d1) - K × N(d2) for calls (opportunity cost)
         const Nd2 = normCdf(d2);
         if (Nd2 < 1e-10) return 0;
-        return Math.max(0, S * normCdf(d1) - K * normCdf(d2));
+        return Math.max(0, S * normCdf(d1) - K * ert * Nd2);
     }
 }
 
 /* Score a ladder combination — mixed-expiry safe (uses per-leg dte/fp) */
-function scoreLadder(legs: SuggestedTrade[], dvolVal: number | null): Omit<ScoredLadder, 'topFactor'> & { factors: number[] } {
+function scoreLadder(legs: SuggestedTrade[], dvolVal: number | null, r: number = 0): Omit<ScoredLadder, 'topFactor'> & { factors: number[] } {
     const n = legs.length;
     const dv = dvolVal || 57;
 
@@ -108,7 +110,8 @@ function scoreLadder(legs: SuggestedTrade[], dvolVal: number | null): Omit<Score
         const sigma = l.markIv / 100;
         const T = l.dte / 365;
         const pITM = l.probExercise;
-        const tailLoss = conditionalTailLoss(l.futuresPrice, l.strike, T, sigma, l.type === 'Call' ? 'C' : 'P');
+        const r_leg = l.type === 'Put' ? r : 0;
+        const tailLoss = conditionalTailLoss(l.futuresPrice, l.strike, T, sigma, l.type === 'Call' ? 'C' : 'P', r_leg);
         const ev = l.premiumUsd * (1 - pITM) - tailLoss * pITM;
         const maxLoss = l.type === 'Put' ? Math.max(0, tailLoss) : l.futuresPrice * sigma * 2 * Math.sqrt(T);
         totalEv += ev;
@@ -195,7 +198,7 @@ function combinationsWithRep<T>(arr: T[], k: number): T[][] {
 }
 
 /* Combinatorial search: all valid numLegs-strike combos for an expiry */
-function buildOptimalLadder(trades: SuggestedTrade[], type: 'Call' | 'Put', dvolVal: number | null, numLegs: number, allowRep: boolean): ScoredLadder | null {
+function buildOptimalLadder(trades: SuggestedTrade[], type: 'Call' | 'Put', dvolVal: number | null, numLegs: number, allowRep: boolean, sofrRate: number = 0): ScoredLadder | null {
     const ofType = trades.filter(t => t.type === type);
     if (!allowRep && ofType.length < numLegs) return null;
     if (allowRep && ofType.length === 0) return null;
@@ -224,7 +227,7 @@ function buildOptimalLadder(trades: SuggestedTrade[], type: 'Call' | 'Put', dvol
         if (allowRep && opts.length === 0) continue;
         const combos = allowRep ? combinationsWithRep(opts, numLegs) : combinations(opts, numLegs);
         for (const combo of combos)
-            allCandidates.push(scoreLadder(combo, dvolVal));
+            allCandidates.push(scoreLadder(combo, dvolVal, sofrRate));
     }
 
     // ── Cross-expiry combinations ────────
@@ -235,7 +238,7 @@ function buildOptimalLadder(trades: SuggestedTrade[], type: 'Call' | 'Put', dvol
         const combos = allowRep ? combinationsWithRep(top, numLegs) : combinations(top, numLegs);
         for (const combo of combos) {
             const key = combo.map(x => `${x.strike}-${x.expiry}`).join('|');
-            if (!seen.has(key)) { seen.add(key); allCandidates.push(scoreLadder(combo, dvolVal)); }
+            if (!seen.has(key)) { seen.add(key); allCandidates.push(scoreLadder(combo, dvolVal, sofrRate)); }
         }
     }
 
@@ -278,13 +281,14 @@ export default function BTCCoveredYields({ darkMode }: { darkMode: boolean }) {
     const [pinnedKey, setPinnedKey] = useState<string | null>(null);
     const [spot, setSpot] = useState<{ v: number; c: number; cp: number } | null>(null);
     const [dvol, setDvol] = useState<{ v: number; cp: number } | null>(null);
+    const [sofr, setSofr] = useState<{ v: number } | null>(null);
     const [opts, setOpts] = useState<ParsedOption[]>([]);
     const [loading, setLoading] = useState(true);
     const [trades, setTrades] = useState<SuggestedTrade[]>([]);
     const [locked, setLocked] = useState<Set<string>>(new Set());
     const [sugAt, setSugAt] = useState<Date | null>(null);
     const [dataAt, setDataAt] = useState<Date | null>(null);
-    const [st, setSt] = useState<{ spot: Status; opt: Status; dvol: Status }>({ spot: 'load', opt: 'load', dvol: 'load' });
+    const [st, setSt] = useState<{ spot: Status; opt: Status; dvol: Status; sofr: Status }>({ spot: 'load', opt: 'load', dvol: 'load', sofr: 'load' });
     const [maxPexCap, setMaxPexCap] = useState(40); // P(exercise) cap 0–100, default 40%
     const [numLegs, setNumLegs] = useState(0);       // 0 = Auto, 1-5 = fixed
     const [allowRep, setAllowRep] = useState(false); // allow repetitive legs
@@ -293,18 +297,19 @@ export default function BTCCoveredYields({ darkMode }: { darkMode: boolean }) {
     const { computedCall, computedPut } = useMemo(() => {
         if (!trades.length) return { computedCall: null as ScoredLadder | null, computedPut: null as ScoredLadder | null };
         const best = (type: 'Call' | 'Put'): ScoredLadder | null => {
+            const rate = type === 'Put' ? (sofr?.v || 0) / 100 : 0;
             if (numLegs === 0) {
                 let top: ScoredLadder | null = null;
                 for (let n = 1; n <= 5; n++) {
-                    const l = buildOptimalLadder(trades, type, dvol?.v || null, n, allowRep);
+                    const l = buildOptimalLadder(trades, type, dvol?.v || null, n, allowRep, rate);
                     if (l && (!top || l.score > top.score)) top = l;
                 }
                 return top;
             }
-            return buildOptimalLadder(trades, type, dvol?.v || null, numLegs, allowRep);
+            return buildOptimalLadder(trades, type, dvol?.v || null, numLegs, allowRep, rate);
         };
         return { computedCall: best('Call'), computedPut: best('Put') };
-    }, [trades, dvol, numLegs, allowRep]);
+    }, [trades, dvol, numLegs, allowRep, sofr]);
 
     // Set of keys for options that are currently recommended (used to highlight them in the matrix)
     const recommendedKeys = useMemo(() => {
@@ -325,9 +330,10 @@ export default function BTCCoveredYields({ darkMode }: { darkMode: boolean }) {
     // ── Fetch (5s) ────────────────────────────────────────────────
     useEffect(() => {
         const go = async () => {
-            const ns = { spot: 'load' as Status, opt: 'load' as Status, dvol: 'load' as Status };
+            const ns = { spot: 'load' as Status, opt: 'load' as Status, dvol: 'load' as Status, sofr: 'load' as Status };
             try { const r = await fetch('https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT'); const d = await r.json(); const v = +d.lastPrice; if (v > 0) { setSpot({ v, c: +d.priceChange, cp: +d.priceChangePercent }); ns.spot = 'ok'; } else ns.spot = 'err'; } catch { ns.spot = 'err'; }
             try { const now = Date.now(); const r = await fetch(`https://www.deribit.com/api/v2/public/get_volatility_index_data?currency=BTC&resolution=3600&start_timestamp=${now - 86520000}&end_timestamp=${now}`); const d = await r.json(); if (d.result?.data?.length > 0) { const a = d.result.data; const l = a[a.length - 1][4] ?? a[a.length - 1][1]; const f = a[0][1]; setDvol({ v: l, cp: ((l - f) / f) * 100 }); ns.dvol = 'ok'; } else ns.dvol = 'err'; } catch { ns.dvol = 'err'; }
+            try { const r = await fetch('https://markets.newyorkfed.org/api/rates/secured/sofr/last/30.json'); const d = await r.json(); if (d.refRates?.length > 0) { const avg = d.refRates.reduce((s: number, x: any) => s + x.percentRate, 0) / d.refRates.length; setSofr({ v: avg }); ns.sofr = 'ok'; } else ns.sofr = 'err'; } catch { ns.sofr = 'err'; }
             try {
                 const r = await fetch('https://www.deribit.com/api/v2/public/get_book_summary_by_currency?currency=BTC&kind=option');
                 const d = await r.json();
@@ -352,19 +358,20 @@ export default function BTCCoveredYields({ darkMode }: { darkMode: boolean }) {
             const t: SuggestedTrade[] = [];
             for (const o of opts) {
                 if (o.dte < 15) continue;
-                const apy = o.type === 'P' ? putApy(o.markPrice, o.futuresPrice, o.strike, o.dte) : callApy(o.markPrice, o.dte);
+                const r_val = o.type === 'P' ? (sofr?.v || 0) / 100 : 0;
+                const apy = o.type === 'P' ? putApy(o.markPrice, o.futuresPrice, o.strike, o.dte, r_val) : callApy(o.markPrice, o.dte);
                 if (apy <= 5 || apy > 200) continue;
                 const m = o.type === 'C' ? o.strike / o.futuresPrice : o.futuresPrice / o.strike;
                 if (m < 1 || m > 1.15) continue;
-                const pe = pEx(o.futuresPrice, o.strike, o.dte / 365, o.markIv / 100, o.type);
+                const pe = pEx(o.futuresPrice, o.strike, o.dte / 365, o.markIv / 100, o.type, r_val);
                 if (pe > maxPexCap / 100) continue; // Only strategies with ≤ maxPexCap% P(exercise)
-                t.push({ instrument: o.instrument, type: o.type === 'P' ? 'Put' : 'Call', strike: o.strike, expiry: o.expiry, dte: o.dte, apy, markIv: o.markIv, futuresPrice: o.futuresPrice, probExercise: pe, premiumUsd: o.markPrice * o.futuresPrice, moneyness: (m - 1) * 100 });
+                t.push({ ...o, apy, type: o.type === 'C' ? 'Call' : 'Put', moneyness: m, probExercise: pe, premiumUsd: o.markPrice * o.futuresPrice });
             }
             t.sort((a, b) => b.apy - a.apy);
             setTrades(t.slice(0, Math.max(15, numLegs * 4))); setSugAt(new Date());
         };
         compute(); const iv = setInterval(compute, 15000); return () => clearInterval(iv);
-    }, [opts, maxPexCap]);
+    }, [opts, maxPexCap, numLegs, sofr]);
 
     // ── Derived data (DTE ≥ 15) ───────────────────────────────────
     const { exps, putK, callK, cells } = useMemo(() => {
@@ -381,19 +388,20 @@ export default function BTCCoveredYields({ darkMode }: { darkMode: boolean }) {
         const cells: Record<string, CellData> = {};
         for (const o of f) {
             const k = `${o.type}-${o.strike}-${o.expiry}`;
+            const r_val = o.type === 'P' ? (sofr?.v || 0) / 100 : 0;
             cells[k] = {
-                apy: o.type === 'P' ? putApy(o.markPrice, o.futuresPrice, o.strike, o.dte) : callApy(o.markPrice, o.dte),
+                apy: o.type === 'P' ? putApy(o.markPrice, o.futuresPrice, o.strike, o.dte, r_val) : callApy(o.markPrice, o.dte),
                 markIv: o.markIv,
                 markPrice: o.markPrice,
                 futuresPrice: o.futuresPrice,
                 dte: o.dte,
                 premiumUsd: o.markPrice * o.futuresPrice,
-                probExercise: pEx(o.futuresPrice, o.strike, o.dte / 365, o.markIv / 100, o.type),
-                greeks: bsGreeks(o.futuresPrice, o.strike, o.dte / 365, o.markIv / 100, o.type)
+                probExercise: pEx(o.futuresPrice, o.strike, o.dte / 365, o.markIv / 100, o.type, r_val),
+                greeks: bsGreeks(o.futuresPrice, o.strike, o.dte / 365, o.markIv / 100, o.type, r_val)
             };
         }
         return { exps, putK, callK, cells };
-    }, [opts, spot]);
+    }, [opts, spot, sofr]);
 
     /* ── Cell (Derive-style: tabular-nums, tight, subtle heat bg) ── */
     const dataFont: React.CSSProperties = {
@@ -497,6 +505,7 @@ export default function BTCCoveredYields({ darkMode }: { darkMode: boolean }) {
                 <Dot s={st.spot} label="Binance" />
                 <Dot s={st.opt} label="Deribit" />
                 <Dot s={st.dvol} label="DVOL" />
+                <Dot s={st.sofr} label="SOFR" />
                 <div style={{ marginLeft: 'auto', display: 'flex', gap: '12px', alignItems: 'center' }}>
                     {spot !== null && (
                         <span style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: 'var(--t-data)', fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: 'var(--text-primary)' }}>
@@ -504,6 +513,11 @@ export default function BTCCoveredYields({ darkMode }: { darkMode: boolean }) {
                             <span style={{ fontSize: 'var(--t-meta)', fontWeight: 500, color: spot.c >= 0 ? 'var(--green)' : 'var(--red)' }}>
                                 {spot.c >= 0 ? '↗' : '↘'} {Math.abs(spot.cp).toFixed(2)}%
                             </span>
+                        </span>
+                    )}
+                    {sofr !== null && (
+                        <span style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: 'var(--t-data)', fontVariantNumeric: 'tabular-nums', color: 'var(--text-secondary)' }}>
+                            SOFR <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{sofr.v.toFixed(2)}%</span>
                         </span>
                     )}
                     {dvol !== null && (
