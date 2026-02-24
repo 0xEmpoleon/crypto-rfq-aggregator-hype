@@ -1,0 +1,11 @@
+INFO:     Will watch for changes in these directories: ['/Users/toshinoriishibashi/Desktop/crypto-rfq-aggregator/backend']
+INFO:     Uvicorn running on http://127.0.0.1:8001 (Press CTRL+C to quit)
+INFO:     Started reloader process [29967] using StatReload
+INFO:     Started server process [30037]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     connection rejected (400 Bad Request)
+INFO:     connection closed
+INFO:     127.0.0.1:59345 - "WebSocket /ws" [accepted]
+INFO:     connection open
+INFO:     connection closed
