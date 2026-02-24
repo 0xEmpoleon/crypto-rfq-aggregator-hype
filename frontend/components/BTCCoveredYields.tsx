@@ -356,6 +356,7 @@ export default function BTCCoveredYields({ darkMode }: { darkMode: boolean }) {
                 }}>
                 <span style={{ fontWeight: apy > 30 ? 600 : 400 }}>{apy.toFixed(1)}%</span>
                 <span style={{ fontSize: 'var(--t-micro)', color: 'var(--text-muted)', marginLeft: '2px' }}>{(pe * 100).toFixed(0)}%</span>
+                <span style={{ display: 'block', fontSize: 'var(--t-micro)', color: 'var(--text-muted)', lineHeight: '1' }}>{(d.premiumUsd / d.futuresPrice).toFixed(4)}฿</span>
                 {(isL || isP) && <span style={{ position: 'absolute', top: 0, right: 1, fontSize: '0.5rem', color: 'var(--blue)' }}>●</span>}
             </td>
         );
@@ -510,11 +511,10 @@ export default function BTCCoveredYields({ darkMode }: { darkMode: boolean }) {
                                     <Tip text="Volatility Edge: how much richer the option's implied vol is vs DVOL index. Positive = selling overpriced vol = edge.">Vol edge</Tip>: {volEdge > 0 ? '+' : ''}{(volEdge * 100).toFixed(1)}% vs DVOL · <Tip text="Kelly Criterion: optimal fraction of capital to allocate based on edge vs variance. Higher = more confident bet. Used by professional traders for position sizing.">Kelly</Tip>: {(kelly * 100).toFixed(1)}% · <Tip text="Risk/Return Ratio: expected value ÷ probability-weighted max loss. Higher = better risk-adjusted return. Think of it like a Sortino ratio for options.">R/R</Tip>: {riskReturn.toFixed(2)}
                                     <br />
                                     {(() => {
-                                        const fp = spot || legs[0].futuresPrice;
                                         const totalPremBtc = legs.reduce((s, l) => s + l.premiumUsd / l.futuresPrice, 0);
                                         const avgDte = legs.reduce((s, l) => s + l.dte, 0) / legs.length;
                                         const annualBtc = totalPremBtc * (365 / avgDte);
-                                        return <>If BTC stays {dir} all strikes by {expiryLabel}, keep <span style={{ color: accent, fontWeight: 600 }}>${totalPrem.toFixed(0)} ≈ {totalPremBtc.toFixed(4)} BTC</span> ({avgApy.toFixed(0)}% APR · {annualBtc.toFixed(4)} BTC/yr annualised).</>;
+                                        return <><span style={{ color: 'var(--text-secondary)' }}>OTM → </span><span style={{ color: accent, fontWeight: 600 }}>${totalPrem.toFixed(0)} · {totalPremBtc.toFixed(4)}฿</span> · {avgApy.toFixed(0)}% APR · {annualBtc.toFixed(4)}฿/yr</>;
                                     })()}
                                 </div>
                             </div>
