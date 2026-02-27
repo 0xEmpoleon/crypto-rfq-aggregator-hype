@@ -29,7 +29,12 @@ export function useRFQData() {
                     if (data.venue === 'Deribit') setDeribitStatus(data.status);
                     if (data.venue === 'Derive') setDeriveStatus(data.status);
                 } else if (data.type === 'suggestion') {
-                    setSuggestions(prev => [data.data, ...prev].slice(0, 5));
+                    // Optimized: Only keep suggestions that aren't 'overflowing'
+                    setSuggestions(prev => {
+                        const exists = prev.find(p => p.id === data.data.id);
+                        if (exists) return prev; // Avoid duplicates
+                        return [data.data, ...prev].slice(0, 10);
+                    });
                 } else if (data.underlying_asset) {
                     setQuotes(prev => {
                         const existing = [...prev];

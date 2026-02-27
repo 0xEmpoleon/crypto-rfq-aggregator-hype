@@ -3,3 +3,6 @@ uvicorn
 websockets
 httpx
 pydantic
+pandas
+scipy
+numpy

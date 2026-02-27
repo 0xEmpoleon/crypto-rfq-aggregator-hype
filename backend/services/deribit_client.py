@@ -1,8 +1,7 @@
 import asyncio
 import json
 import logging
-import websockets
-from websockets.exceptions import ConnectionClosed
+import time
 from models.options import UnifiedOptionQuote
 
 logger = logging.getLogger(__name__)
@@ -17,51 +16,52 @@ class DeribitClient:
 
     async def connect(self):
         self.running = True
-        while self.running:
-            try:
-                async with websockets.connect(self.WS_URL) as websocket:
-                    logger.info("Connected to Deribit WebSocket")
-                    await self.broadcast(json.dumps({"type": "status", "venue": "Deribit", "status": "Connected"}))
+        import httpx
+        async with httpx.AsyncClient() as client:
+            while self.running:
+                try:
+                    # 1. Fetch active BTC options and Mark Data
+                    # We pool the summary every 15s to minimize external calls
+                    resp = await client.get("https://www.deribit.com/api/v2/public/get_book_summary_by_currency?currency=BTC&kind=option")
+                    data = resp.json()
                     
-                    # 1. Fetch active BTC 100k options from Deribit
-                    import httpx
-                    async with httpx.AsyncClient() as client:
-                        resp = await client.get("https://www.deribit.com/api/v2/public/get_instruments?currency=BTC&kind=option&expired=false")
-                        data = resp.json()
-                        deribit_instruments = [
-                            item["instrument_name"] for item in data.get("result", [])
-                            if "-100000-" in item["instrument_name"]
-                        ][:20]
-                        
-                    channels = [f"ticker.{inst}.100ms" for inst in deribit_instruments]
+                    results = data.get("result", [])
+                    # Filter for top 20 liquid instruments (highest volume/OI)
+                    results.sort(key=lambda x: x.get("open_interest", 0), reverse=True)
+                    top_instruments = results[:20]
+
+                    for item in top_instruments:
+                        quote = self._parse_summary_item(item)
+                        if quote:
+                            await self.broadcast(quote.model_dump_json())
                     
-                    msg = {
-                        "jsonrpc": "2.0",
-                        "id": 1,
-                        "method": "public/subscribe",
-                        "params": {
-                            "channels": channels
-                        }
-                    }
-                    await websocket.send(json.dumps(msg))
+                    await self.broadcast(json.dumps({"type": "status", "venue": "Deribit", "status": "Updated"}))
+                    # Requirement: 15 second interval
+                    await asyncio.sleep(15)
 
-                    while self.running:
-                        response = await websocket.recv()
-                        data = json.loads(response)
-                        
-                        if "params" in data and "data" in data["params"]:
-                            quote = self._parse_ticker(data["params"]["data"])
-                            if quote:
-                                await self.broadcast(quote.model_dump_json())
+                except Exception as e:
+                    logger.error(f"Deribit REST Polling error: {e}")
+                    await self.broadcast(json.dumps({"type": "status", "venue": "Deribit", "status": "Error"}))
+                    await asyncio.sleep(5)
 
-            except ConnectionClosed:
-                logger.warning("Deribit WS closed, reconnecting in 5s...")
-                await self.broadcast(json.dumps({"type": "status", "venue": "Deribit", "status": "Reconnecting..."}))
-                await asyncio.sleep(5)
-            except Exception as e:
-                logger.error(f"Deribit client error: {e}")
-                await self.broadcast(json.dumps({"type": "status", "venue": "Deribit", "status": "Error"}))
-                await asyncio.sleep(5)
+    def _parse_summary_item(self, item: dict) -> UnifiedOptionQuote:
+        instrument = item.get("instrument_name", "")
+        parts = instrument.split("-")
+        if len(parts) != 4: return None
+        
+        return UnifiedOptionQuote(
+            source_exchange="Deribit",
+            underlying_asset=parts[0],
+            strike_price=float(parts[2]),
+            option_type=parts[3],
+            expiration_timestamp=parts[1],
+            bid_price=item.get("bid"),
+            ask_price=item.get("ask"),
+            bid_iv=item.get("bid_iv"),
+            ask_iv=item.get("ask_iv"),
+            greeks={}, # Summary has limited greeks, usually fine for RFQ
+            timestamp=int(time.time() * 1000)
+        )
 
     def _parse_ticker(self, data: dict) -> UnifiedOptionQuote:
         instrument = data.get("instrument_name", "")
