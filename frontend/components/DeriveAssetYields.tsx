@@ -1,52 +1,34 @@
 "use client";
 import React, { useState, useEffect, useMemo } from 'react';
+import * as MathUtils from '../utils/optionsMath';
 
 /* ═══════════════════════════════════════════════════════════════════
    Derive Asset Yields — Multi-Currency Aggregator
-   
-   Supports: BTC, ETH, SOL, HYPE
-   Data Provided by Derive.xyz
+    Optimized for Performance: Pre-computed Greeks & Modular Math
    ═══════════════════════════════════════════════════════════════════ */
 
-interface ParsedOption { instrument: string; strike: number; expiry: string; expiryTs: number; type: 'C' | 'P'; markPrice: number; bidPrice: number; askPrice: number; markIv: number; futuresPrice: number; dte: number; greeks: { delta: number; gamma: number; theta: number; vega: number; }; probExercise: number; tailLoss: number; }
-interface CellData { apy: number; markIv: number; markPrice: number; bidPrice: number; futuresPrice: number; dte: number; premiumUsd: number; probExercise: number; greeks: { delta: number; gamma: number; theta: number; vega: number; }; }
-interface SuggestedTrade { instrument: string; type: 'Put' | 'Call'; strike: number; expiry: string; dte: number; apy: number; markIv: number; futuresPrice: number; probExercise: number; premiumUsd: number; moneyness: number; tailLoss: number; greeks: { delta: number; gamma: number; theta: number; vega: number; }; }
+interface ParsedOption {
+    instrument: string; strike: number; expiry: string; expiryTs: number;
+    type: 'C' | 'P'; markPrice: number; bidPrice: number; askPrice: number;
+    markIv: number; futuresPrice: number; dte: number;
+    greeks: { delta: number; gamma: number; theta: number; vega: number; };
+    probExercise: number; tailLoss: number;
+}
+
+interface CellData {
+    apy: number; markIv: number; markPrice: number; bidPrice: number;
+    futuresPrice: number; dte: number; premiumUsd: number;
+    probExercise: number; greeks: { delta: number; gamma: number; theta: number; vega: number; };
+}
+
+interface SuggestedTrade {
+    instrument: string; type: 'Put' | 'Call'; strike: number; expiry: string;
+    dte: number; apy: number; markIv: number; futuresPrice: number;
+    probExercise: number; premiumUsd: number; moneyness: number; tailLoss: number;
+    greeks: { delta: number; gamma: number; theta: number; vega: number; };
+}
+
 type Status = 'ok' | 'err' | 'load';
-
-function normCdf(x: number): number {
-    const a1 = 0.254829592, a2 = -0.284496736, a3 = 1.421413741, a4 = -1.453152027, a5 = 1.061405429, p = 0.3275911;
-    const sign = x < 0 ? -1 : 1; const t = 1 / (1 + p * Math.abs(x));
-    return 0.5 * (1 + sign * (1 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * Math.exp(-x * x / 2)));
-}
-
-function pEx(S: number, K: number, T: number, s: number, type: 'C' | 'P'): number {
-    if (T <= 0 || s <= 0) return 0;
-    const d2 = (Math.log(S / K) - 0.5 * s * s * T) / (s * Math.sqrt(T));
-    return type === 'C' ? normCdf(d2) : normCdf(-d2);
-}
-
-function bsGreeks(S: number, K: number, T: number, sigma: number, type: 'C' | 'P') {
-    if (T <= 0 || sigma <= 0) return { delta: 0, gamma: 0, theta: 0, vega: 0 };
-    const sqrtT = Math.sqrt(T);
-    const d1 = (Math.log(S / K) + 0.5 * sigma * sigma * T) / (sigma * sqrtT);
-    const normPdf = (x: number) => Math.exp(-0.5 * x * x) / Math.sqrt(2 * Math.PI);
-    const Nd1 = normCdf(d1);
-    const nPdfd1 = normPdf(d1);
-    const delta = type === 'C' ? Nd1 : Nd1 - 1;
-    const gamma = nPdfd1 / (S * sigma * sqrtT);
-    const vega = S * nPdfd1 * sqrtT / 100;
-    const theta = -(S * sigma * nPdfd1) / (2 * sqrtT) / 365;
-    return { delta, gamma, theta, vega };
-}
-function parseInst(n: string) { const p = n.split('-'); return p.length === 4 ? { expiry: p[1], strike: +p[2].replace('_', '.'), type: p[3] as 'C' | 'P' } : null; }
-function expiryToDate(e: string): Date {
-    const y = +e.slice(0, 4);
-    const m = +e.slice(4, 6) - 1;
-    const d = +e.slice(6, 8);
-    return new Date(Date.UTC(y, m, d, 8));
-}
-const putApy = (mp: number, fp: number, k: number, d: number) => d > 0 && k > 0 ? (mp / k) * (365 / d) * 100 : 0;
-const callApy = (mp: number, fp: number, d: number) => d > 0 && fp > 0 ? (mp / fp) * (365 / d) * 100 : 0;
 
 interface ScoredLadder {
     legs: SuggestedTrade[];
@@ -64,126 +46,16 @@ interface ScoredLadder {
     topFactor: string;
 }
 
-function conditionalTailLoss(S: number, K: number, T: number, sigma: number, type: 'C' | 'P'): number {
-    if (T <= 0 || sigma <= 0) return 0;
-    const sqrtT = Math.sqrt(T);
-    const d1 = (Math.log(S / K) + 0.5 * sigma * sigma * T) / (sigma * sqrtT);
-    const d2 = d1 - sigma * sqrtT;
-    if (type === 'P') {
-        const Nd2 = normCdf(-d2);
-        if (Nd2 < 1e-10) return 0;
-        return Math.max(0, K * normCdf(-d2) - S * normCdf(-d1));
-    } else {
-        const Nd2 = normCdf(d2);
-        if (Nd2 < 1e-10) return 0;
-        return Math.max(0, S * normCdf(d1) - K * normCdf(d2));
-    }
+function parseInst(n: string) {
+    const p = n.split('-');
+    return p.length === 4 ? { expiry: p[1], strike: +p[2].replace('_', '.'), type: p[3] as 'C' | 'P' } : null;
 }
 
-function scoreLadder(legs: SuggestedTrade[], dvolVal: number | null): Omit<ScoredLadder, 'topFactor'> & { factors: number[] } {
-    const n = legs.length;
-    const dv = dvolVal || 100;
-    let totalEv = 0, totalRisk = 0, totalPrem = 0, totalApy = 0, volEdgeSum = 0, thetaSum = 0;
-    for (const l of legs) {
-        const sigma = l.markIv / 100;
-        const T = l.dte / 365;
-        const pITM = l.probExercise;
-        const tailLoss = l.tailLoss;
-        const ev = l.premiumUsd * (1 - pITM) - tailLoss * pITM;
-        const maxLoss = l.type === 'Put' ? Math.max(0, tailLoss) : l.futuresPrice * sigma * 2 * Math.sqrt(T);
-        totalEv += ev;
-        totalRisk += pITM * maxLoss;
-        totalPrem += l.premiumUsd;
-        totalApy += l.apy;
-        volEdgeSum += (l.markIv - dv) / Math.max(dv, 1);
-        thetaSum += l.premiumUsd / l.dte;
-    }
-    const avgDte = legs.reduce((s, l) => s + l.dte, 0) / n;
-    const fp0 = legs[0].futuresPrice;
-    const avgApy = totalApy / n;
-    const evAnnual = totalEv * (365 / avgDte);
-    const volEdge = volEdgeSum / n;
-    const thetaEff = thetaSum;
-    const riskReturn = totalRisk > 0 ? totalEv / totalRisk : 0;
-    const maxPex = Math.max(...legs.map(l => l.probExercise));
-    const probAllOTM = 1 - maxPex;
-    const avgLoss = totalRisk / Math.max(maxPex, 0.01);
-    const kelly = totalPrem > 0 ? Math.max(0, probAllOTM - maxPex * avgLoss / totalPrem) : 0;
-    const strikes = legs.map(l => l.strike);
-    const diversification = (Math.max(...strikes) - Math.min(...strikes)) / fp0;
-    const factors = [evAnnual, Math.max(0, volEdge), riskReturn, thetaEff, kelly, diversification];
-    return { legs, score: 0, ev: totalEv, evAnnual, volEdge, thetaEff, riskReturn, kelly, diversification, probAllOTM, totalPrem, avgApy, factors };
-}
-
-function rankLadders(candidates: ReturnType<typeof scoreLadder>[]): ScoredLadder[] {
-    if (!candidates.length) return [];
-    const W = [0.30, 0.20, 0.20, 0.15, 0.10, 0.05];
-    const factorNames = ['Expected Value', 'Vol Edge', 'Risk/Return', 'Theta', 'Kelly', 'Diversification'];
-    const nFactors = 6;
-    const mins = Array(nFactors).fill(Infinity);
-    const maxs = Array(nFactors).fill(-Infinity);
-    for (const c of candidates) {
-        for (let i = 0; i < nFactors; i++) {
-            mins[i] = Math.min(mins[i], c.factors[i]);
-            maxs[i] = Math.max(maxs[i], c.factors[i]);
-        }
-    }
-    return candidates.map(c => {
-        let score = 0;
-        let topContrib = 0;
-        let topIdx = 0;
-        for (let i = 0; i < nFactors; i++) {
-            const range = maxs[i] - mins[i];
-            const norm = range > 1e-10 ? (c.factors[i] - mins[i]) / range : 0.5;
-            const contrib = W[i] * norm;
-            score += contrib;
-            if (contrib > topContrib) { topContrib = contrib; topIdx = i; }
-        }
-        const score10 = Math.min(10, Math.max(0, score * 10));
-        return { ...c, score: score10, topFactor: factorNames[topIdx] };
-    }).sort((a, b) => b.score - a.score);
-}
-
-function combinations<T>(arr: T[], k: number): T[][] {
-    if (k === 0) return [[]]; if (arr.length < k) return [];
-    const [first, ...rest] = arr;
-    return [...combinations(rest, k - 1).map(c => [first, ...c]), ...combinations(rest, k)];
-}
-function combinationsWithRep<T>(arr: T[], k: number): T[][] {
-    if (k === 0) return [[]]; if (arr.length === 0) return [];
-    const [first, ...rest] = arr;
-    return [...combinationsWithRep(arr, k - 1).map(c => [first, ...c]), ...combinationsWithRep(rest, k)];
-}
-
-function buildOptimalLadder(trades: SuggestedTrade[], type: 'Call' | 'Put', dvolVal: number | null, numLegs: number, allowRep: boolean): ScoredLadder | null {
-    const ofType = trades.filter(t => t.type === type);
-    if (!allowRep && ofType.length < numLegs) return null;
-    if (allowRep && ofType.length === 0) return null;
-    const unique = new Map<string, SuggestedTrade>();
-    for (const t of ofType) { const key = `${t.strike}-${t.expiry}`; if (!unique.has(key)) unique.set(key, t); }
-    const all = Array.from(unique.values()).sort((a, b) => b.apy - a.apy);
-    const allCandidates: ReturnType<typeof scoreLadder>[] = [];
-    const perExpiryCap = allowRep ? Math.min(5, numLegs + 2) : Math.max(8, numLegs + 5);
-    const byExpiry = new Map<string, SuggestedTrade[]>();
-    for (const t of all) { const arr = byExpiry.get(t.expiry) || []; arr.push(t); byExpiry.set(t.expiry, arr); }
-    for (const [, expTrades] of Array.from(byExpiry.entries())) {
-        const opts = expTrades.sort((a, b) => type === 'Call' ? a.strike - b.strike : b.strike - a.strike).slice(0, perExpiryCap);
-        if (!allowRep && opts.length < numLegs) continue;
-        const combos = allowRep ? combinationsWithRep(opts, numLegs) : combinations(opts, numLegs);
-        for (const combo of combos) allCandidates.push(scoreLadder(combo, dvolVal));
-    }
-    const topCap = allowRep ? 8 : 15;
-    const top = all.slice(0, topCap);
-    if ((allowRep && top.length > 0) || (!allowRep && top.length >= numLegs)) {
-        const seen = new Set<string>();
-        const combos = allowRep ? combinationsWithRep(top, numLegs) : combinations(top, numLegs);
-        for (const combo of combos) {
-            const key = combo.map(x => `${x.strike}-${x.expiry}`).sort().join('|');
-            if (!seen.has(key)) { seen.add(key); allCandidates.push(scoreLadder(combo, dvolVal)); }
-        }
-    }
-    if (!allCandidates.length) return null;
-    return rankLadders(allCandidates)[0] || null;
+function expiryToDate(e: string): Date {
+    const y = +e.slice(0, 4);
+    const m = +e.slice(4, 6) - 1;
+    const d = +e.slice(6, 8);
+    return new Date(Date.UTC(y, m, d, 8));
 }
 
 const Tip = ({ text, children }: { text: string; children: React.ReactNode }) => (
@@ -246,19 +118,21 @@ export default function DeriveAssetYields({ asset, darkMode }: { asset: 'HYPE' |
             if (numLegs === 0) {
                 let top: ScoredLadder | null = null;
                 for (let n = 1; n <= 5; n++) {
-                    const l = buildOptimalLadder(trades, type, dvol?.v || null, n, allowRep);
+                    const l = MathUtils.buildOptimalLadder(trades, type, dvol?.v || null, n, allowRep);
                     if (l && (!top || l.score > top.score)) top = l;
                 }
                 return top;
             }
-            return buildOptimalLadder(trades, type, dvol?.v || null, numLegs, allowRep);
+            return MathUtils.buildOptimalLadder(trades, type, dvol?.v || null, numLegs, allowRep);
         };
         return { computedCall: best('Call'), computedPut: best('Put') };
     }, [trades, dvol, numLegs, allowRep]);
 
     const recommendedKeys = useMemo(() => {
         const s = new Set<string>();
-        [computedCall, computedPut].forEach(l => { if (l && l.score >= 5.0) l.legs.forEach(leg => s.add(`${leg.type === 'Call' ? 'C' : 'P'}-${leg.strike}-${leg.expiry}`)); });
+        [computedCall, computedPut].forEach((l: ScoredLadder | null) => {
+            if (l && l.score >= 5.0) l.legs.forEach((leg: SuggestedTrade) => s.add(`${leg.type === 'Call' ? 'C' : 'P'}-${leg.strike}-${leg.expiry}`));
+        });
         return s;
     }, [computedCall, computedPut]);
 
@@ -294,9 +168,9 @@ export default function DeriveAssetYields({ asset, darkMode }: { asset: 'HYPE' |
                         if (up <= 0) continue;
                         const y = info.expiry.slice(2, 4); const m = +info.expiry.slice(4, 6) - 1; const dt = info.expiry.slice(6, 8);
                         const M = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
-                        const greeks = bsGreeks(up, info.strike, dte / 365, iv / 100, info.type);
-                        const pExVal = pEx(up, info.strike, dte / 365, iv / 100, info.type);
-                        const tailLoss = conditionalTailLoss(up, info.strike, dte / 365, iv / 100, info.type);
+                        const greeks = MathUtils.calculateGreeks(up, info.strike, dte / 365, iv / 100, info.type);
+                        const pExVal = MathUtils.calculateProbExercise(up, info.strike, dte / 365, iv / 100, info.type);
+                        const tailLoss = MathUtils.calculateTailLoss(up, info.strike, dte / 365, iv / 100, info.type);
                         arr.push({ instrument: name, strike: info.strike, expiry: `${dt}${M[m]}${y}`, expiryTs: ed.getTime(), type: info.type, markPrice: mp, bidPrice: bp, askPrice: ap, markIv: iv, futuresPrice: up, dte, greeks, probExercise: pExVal, tailLoss });
                     }
                 }
@@ -305,30 +179,23 @@ export default function DeriveAssetYields({ asset, darkMode }: { asset: 'HYPE' |
                     if (currentSpot > 0) {
                         const expiryAtms: { dte: number; iv: number }[] = [];
                         const groupedByExp = new Map<string, ParsedOption[]>();
-                        arr.forEach(o => { if (o.dte > 0) { if (!groupedByExp.has(o.expiry)) groupedByExp.set(o.expiry, []); groupedByExp.get(o.expiry)!.push(o); } });
-                        for (const [, options] of Array.from(groupedByExp.entries())) {
-                            let bestDiff = Infinity; options.forEach(o => bestDiff = Math.min(bestDiff, Math.abs(o.strike - currentSpot)));
+                        arr.forEach(o => {
+                            if (o.dte > 0) {
+                                if (!groupedByExp.has(o.expiry)) groupedByExp.set(o.expiry, []);
+                                groupedByExp.get(o.expiry)!.push(o);
+                            }
+                        });
+
+                        groupedByExp.forEach((options) => {
+                            let bestDiff = Infinity;
+                            options.forEach(o => bestDiff = Math.min(bestDiff, Math.abs(o.strike - currentSpot)));
                             const atATM = options.filter(o => Math.abs(o.strike - currentSpot) === bestDiff);
                             const c = atATM.find(o => o.type === 'C'), p = atATM.find(o => o.type === 'P');
                             const iv = (c && p) ? (c.markIv + p.markIv) / 2 : (c?.markIv || p?.markIv || 0);
                             if (iv > 0) expiryAtms.push({ dte: options[0].dte, iv });
-                        }
-                        expiryAtms.sort((a, b) => a.dte - b.dte);
+                        });
 
-                        let dvolEst = 0;
-                        if (expiryAtms.length === 0) dvolEst = 0;
-                        else if (expiryAtms.length === 1) dvolEst = expiryAtms[0].iv;
-                        else {
-                            const e1 = expiryAtms.slice().reverse().find(e => e.dte <= 30);
-                            const e2 = expiryAtms.find(e => e.dte > 30);
-                            if (e1 && e2) {
-                                const t1 = e1.dte / 365, t2 = e2.dte / 365, t30 = 30 / 365;
-                                const var1 = e1.iv * e1.iv * t1, var2 = e2.iv * e2.iv * t2;
-                                const var30 = var1 + (var2 - var1) * ((t30 - t1) / (t2 - t1));
-                                dvolEst = Math.sqrt(Math.max(0, var30) / t30);
-                            } else if (e1) dvolEst = e1.iv;
-                            else if (e2) dvolEst = e2.iv;
-                        }
+                        const dvolEst = MathUtils.estimateDvol(expiryAtms);
                         if (dvolEst > 0) { setDvol({ v: dvolEst, cp: 0 }); ns.dvol = 'ok'; }
                     }
 
@@ -376,7 +243,7 @@ export default function DeriveAssetYields({ asset, darkMode }: { asset: 'HYPE' |
                 const price = priceSource === 'market'
                     ? (o.bidPrice || o.markPrice * 0.95)
                     : o.markPrice;
-                const apy = o.type === 'P' ? putApy(price, o.futuresPrice, o.strike, o.dte) : callApy(price, o.futuresPrice, o.dte);
+                const apy = o.type === 'P' ? MathUtils.calculatePutApy(price, o.futuresPrice, o.strike, o.dte) : MathUtils.calculateCallApy(price, o.futuresPrice, o.dte);
                 if (apy <= 5 || apy > 300) continue;
                 const pe = o.probExercise;
                 if (pe > maxPexCap / 100) continue;
@@ -385,7 +252,7 @@ export default function DeriveAssetYields({ asset, darkMode }: { asset: 'HYPE' |
             t.sort((a, b) => b.apy - a.apy); setTrades(t.slice(0, Math.max(15, numLegs * 4))); setSugAt(new Date());
         };
         compute(); const iv = setInterval(compute, 15000); return () => clearInterval(iv);
-    }, [opts, maxPexCap, priceSource, excludedExp, strikeRange, numLegs, allowRep]);
+    }, [opts, maxPexCap, priceSource, excludedExp, strikeRange, numLegs, allowRep, spot]);
 
     const { exps, putK, callK, cells } = useMemo(() => {
         if (!opts.length) return { exps: [], putK: [], callK: [], cells: {} as Record<string, CellData> };
@@ -412,15 +279,20 @@ export default function DeriveAssetYields({ asset, darkMode }: { asset: 'HYPE' |
             const price = priceSource === 'market'
                 ? (o.bidPrice || o.markPrice * 0.95)
                 : o.markPrice;
-            cells[`${o.type}-${o.strike}-${o.expiry}`] = { apy: o.type === 'P' ? putApy(price, o.futuresPrice, o.strike, o.dte) : callApy(price, o.futuresPrice, o.dte), markIv: o.markIv, markPrice: o.markPrice, bidPrice: o.bidPrice, futuresPrice: o.futuresPrice, dte: o.dte, premiumUsd: price, probExercise: o.probExercise, greeks: o.greeks };
+            cells[`${o.type}-${o.strike}-${o.expiry}`] = {
+                apy: o.type === 'P' ? MathUtils.calculatePutApy(price, o.futuresPrice, o.strike, o.dte) : MathUtils.calculateCallApy(price, o.futuresPrice, o.dte),
+                markIv: o.markIv, markPrice: o.markPrice, bidPrice: o.bidPrice, futuresPrice: o.futuresPrice, dte: o.dte, premiumUsd: price, probExercise: o.probExercise, greeks: o.greeks
+            };
         });
         return { exps, putK: pK.sort((a, b) => b - a), callK: cK.sort((a, b) => a - b), cells };
     }, [opts, spot, priceSource, strikeRange]);
 
     const renderCell = (type: 'P' | 'C', strike: number, exp: { label: string; dte: number }) => {
-        const k = `${type}-${strike}-${exp.label}`, d = cells[k], isEx = excludedExp.has(exp.label);
+        const k = `${type}-${strike}-${exp.label}`, d = cells[k];
+        const isEx = excludedExp.has(exp.label);
         const isPexExceeded = d && (d.probExercise * 100 > maxPexCap);
         if (!d) return <td key={k} style={{ color: 'var(--text-muted)', textAlign: 'center', borderBottom: '1px solid rgba(255,255,255,0.05)', fontSize: 'var(--t-data)' }}>—</td>;
+
         const isRec = recommendedKeys.has(k), isP = !!pinnedLocs[k];
 
         // Deribit Arbitrage Coloring
@@ -428,23 +300,18 @@ export default function DeriveAssetYields({ asset, darkMode }: { asset: 'HYPE' |
             ? deribitPrices.mark[k]
             : deribitPrices.bid[k];
 
-        let priceColor = isRec ? (type === 'C' ? 'var(--yellow)' : 'var(--green)') : 'var(--text-muted)';
+        let priceColor = 'var(--text-primary)';
         if (dbitPrice && !isEx) {
-            // Find underlying option from opts to get current market prices
-            const opt = opts.find(o => o.instrument === k.split('-').slice(0, 3).join('-') || `${asset}-${k.split('-')[2]}-${k.split('-')[1]}-${k.split('-')[0]}` === o.instrument);
-            const currentPrice = priceSource === 'market'
-                ? (opt?.bidPrice || d.markPrice * 0.95)
-                : d.markPrice;
-
-            if (currentPrice > dbitPrice * 1.001) priceColor = '#44ff44'; // Superior Premium (Better for seller)
-            else if (currentPrice < dbitPrice * 0.999) priceColor = '#ff4444'; // Inferior Premium (Worse for seller)
+            const currentPrice = d.premiumUsd;
+            if (currentPrice > dbitPrice * 1.001) priceColor = 'var(--green)'; // Superior Premium
+            else if (currentPrice < dbitPrice * 0.999) priceColor = 'var(--red)'; // Inferior Premium
         }
 
-        const bg = isP ? 'rgba(37,99,235,0.2)' : (isEx || isPexExceeded) ? 'transparent' : isRec ? (type === 'C' ? 'rgba(234,179,8,0.25)' : 'rgba(34,197,94,0.25)') : heatColor(d.apy, type, darkMode);
+        const bg = heatColor(d.apy, type, darkMode);
         const premAsset = d.premiumUsd / d.futuresPrice;
 
         return (
-            <td key={k} onClick={(e) => { setPinnedLocs(p => { const o = { ...p }; if (o[k]) delete o[k]; else o[k] = { x: e.clientX, y: e.clientY }; return o; }); }}
+            <td key={k} onClick={(e) => { setPinnedLocs((p: any) => { const o = { ...p }; if (o[k]) delete o[k]; else o[k] = { x: e.clientX, y: e.clientY }; return o; }); }}
                 onMouseEnter={(e) => !pinnedLocs[k] && setHoverTip({ d: { ...d, type: type === 'P' ? 'Put' : 'Call', strike, exp: exp.label }, x: e.clientX, y: e.clientY })}
                 onMouseLeave={() => !pinnedLocs[k] && setHoverTip(null)}
                 style={{
@@ -465,19 +332,8 @@ export default function DeriveAssetYields({ asset, darkMode }: { asset: 'HYPE' |
                     <div style={{ display: 'flex', justifyContent: 'center', fontSize: '10px', color: priceColor, opacity: isRec ? 1 : 0.7, fontWeight: dbitPrice ? 700 : 400, marginTop: '1px' }}>
                         {premAsset.toFixed(4)}{assetSymbol}
                     </div>
-                    {isP && (
-                        <div onClick={e => e.stopPropagation()} style={{ cursor: 'default', position: 'absolute', top: 0, left: 0, zIndex: 9999 }}>
-                            <Tooltip
-                                tip={{ d: { ...d, type: type === 'P' ? 'Put' : 'Call', strike, exp: exp.label }, x: 0, y: 0 }}
-                                onClose={() => { setPinnedLocs(p => { const o = { ...p }; delete o[k]; return o; }); }}
-                                priceSource={priceSource}
-                                inline
-                                assetSymbol={assetSymbol}
-                                onHoverMeta={(meta) => setHoverMeta(meta)}
-                            />
-                        </div>
-                    )}
                 </div>
+                {isP && <Tooltip tip={{ d: { ...d, type: type === 'P' ? 'Put' : 'Call', strike, exp: exp.label }, ...pinnedLocs[k] }} inline onClose={() => setPinnedLocs((p: any) => { const o = { ...p }; delete o[k]; return o; })} onHoverMeta={setHoverMeta} assetSymbol={assetSymbol} priceSource={priceSource} />}
             </td>
         );
     };
@@ -566,9 +422,9 @@ export default function DeriveAssetYields({ asset, darkMode }: { asset: 'HYPE' |
 
                         const { legs, score, totalPrem, avgApy, topFactor, probAllOTM, ev, evAnnual, thetaEff, volEdge, kelly, riskReturn } = l;
                         const probAnyEx = 1 - probAllOTM;
-                        const uniqueExpiries = Array.from(new Set(legs.map(x => x.expiry))).join(' / ');
-                        const avgDte = (legs.reduce((sum, leg) => sum + leg.dte, 0) / legs.length).toFixed(0);
-                        const yieldOnCapital = legs.reduce((sum, leg) => {
+                        const uniqueExpiries = Array.from(new Set(legs.map((x: SuggestedTrade) => x.expiry))).join(' / ');
+                        const avgDte = (legs.reduce((sum: number, leg: SuggestedTrade) => sum + leg.dte, 0) / legs.length).toFixed(0);
+                        const yieldOnCapital = legs.reduce((sum: number, leg: SuggestedTrade) => {
                             const cap = isCall ? (spot?.v || leg.futuresPrice) : leg.strike;
                             return sum + (cap > 0 ? (leg.premiumUsd / cap) * (365 / leg.dte) * 100 : 0);
                         }, 0) / legs.length;
@@ -589,7 +445,7 @@ export default function DeriveAssetYields({ asset, darkMode }: { asset: 'HYPE' |
                                     </div>
                                 </div>
                                 <div style={{ padding: '0 8px 4px', fontSize: 'var(--t-meta)', fontVariantNumeric: 'tabular-nums' }}>
-                                    {legs.map((leg, idx) => (
+                                    {legs.map((leg: SuggestedTrade, idx: number) => (
                                         <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', padding: '1px 0', borderTop: idx > 0 ? '1px solid var(--border-color)' : 'none', color: 'var(--text-secondary)' }}>
                                             <span>Sell {isCall ? 'CC' : 'CSP'} <span style={{ color: 'var(--text-primary)', fontWeight: 500 }}>${leg.strike.toLocaleString()}</span></span>
                                             <span>${leg.premiumUsd.toFixed(pDec)} · {(leg.premiumUsd / leg.futuresPrice).toFixed(4)}{assetSymbol} · {leg.apy.toFixed(0)}% · P(ex) {(leg.probExercise * 100).toFixed(0)}%</span>
@@ -598,7 +454,7 @@ export default function DeriveAssetYields({ asset, darkMode }: { asset: 'HYPE' |
                                 </div>
                                 <div style={{ padding: '4px 8px', borderTop: '1px solid var(--border-color)', fontSize: 'var(--t-meta)', color: 'var(--text-muted)', backgroundColor: 'rgba(0,0,0,0.2)', lineHeight: '1.4' }}>
                                     {(() => {
-                                        const avgStrike = legs.reduce((s, lg) => s + lg.strike, 0) / legs.length;
+                                        const avgStrike = legs.reduce((s: number, lg: SuggestedTrade) => s + lg.strike, 0) / legs.length;
                                         const scaledCap = isCall ? (spot?.v || legs[0].futuresPrice) : avgStrike;
                                         const scaledPrem = totalPrem / legs.length;
                                         const breakeven = isCall ? scaledCap - scaledPrem : avgStrike - scaledPrem;
