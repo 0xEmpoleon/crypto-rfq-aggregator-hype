@@ -23,4 +23,7 @@ class TradeSuggestion(BaseModel):
     action: str
     spread: float
     profit_estimate: float
+    gamma_impact: Optional[float] = None
+    reasoning: Optional[str] = None
+    pro_insight_url: Optional[str] = None
     timestamp: int

@@ -27,7 +27,7 @@ class StrategyRecommenderEngine:
         
         while self.running:
             try:
-                await asyncio.sleep(10)
+                await asyncio.sleep(15)
                 if not self.db.pg_pool:
                     continue
                     

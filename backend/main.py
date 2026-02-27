@@ -5,6 +5,8 @@ import json
 
 from contextlib import asynccontextmanager
 from services.deribit_client import DeribitClient
+from services.derive_client import DeriveClient
+from services.hype_client import HypeClient
 from engine.analyzer import SpreadAnalyzer
 from services.db_manager import DBManager
 
@@ -33,6 +35,8 @@ manager = ConnectionManager()
 db_manager = DBManager()
 analyzer = SpreadAnalyzer(manager.broadcast, db_manager)
 deribit = DeribitClient(analyzer.process_quote)
+derive = DeriveClient(analyzer.process_quote)
+hype = HypeClient(analyzer.process_quote)
 ml_engine = StrategyRecommenderEngine(db_manager, manager.broadcast)
 
 @asynccontextmanager
@@ -41,13 +45,19 @@ async def lifespan(app: FastAPI):
     await db_manager.connect()
     # Start tasks
     task1 = asyncio.create_task(deribit.connect())
-    task3 = asyncio.create_task(ml_engine.run())
+    task2 = asyncio.create_task(derive.connect())
+    task3 = asyncio.create_task(hype.connect())
+    task4 = asyncio.create_task(ml_engine.run())
     yield
     # Stop tasks
     deribit.stop()
+    derive.stop()
+    hype.stop()
     ml_engine.stop()
     task1.cancel()
+    task2.cancel()
     task3.cancel()
+    task4.cancel()
     await db_manager.disconnect()
 
 app = FastAPI(title="Crypto Deribit Option Strategist", lifespan=lifespan)
