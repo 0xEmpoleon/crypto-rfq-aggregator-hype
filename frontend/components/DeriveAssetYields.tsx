@@ -1,6 +1,7 @@
 "use client";
 import React, { useState, useEffect, useMemo } from 'react';
 import * as MathUtils from '../utils/optionsMath';
+import { AssetSymbol, ASSET_CONFIG } from '../config/assets';
 
 /* ═══════════════════════════════════════════════════════════════════
    Derive Asset Yields — Multi-Currency Aggregator
@@ -78,7 +79,8 @@ function heatColor(apy: number, type: 'P' | 'C', dark: boolean): string {
     return type === 'P' ? `rgba(34,197,94,${0.05 + i * 0.25})` : `rgba(234,179,8,${0.05 + i * 0.2})`;
 }
 
-export default function DeriveAssetYields({ asset, darkMode }: { asset: 'HYPE' | 'BTC' | 'ETH' | 'SOL'; darkMode: boolean }) {
+export default function DeriveAssetYields({ asset, darkMode }: { asset: AssetSymbol; darkMode: boolean }) {
+    const cfg = ASSET_CONFIG[asset];
     const [hoverTip, setHoverTip] = useState<{ d: any; x: number; y: number } | null>(null);
     const [pinnedLocs, setPinnedLocs] = useState<Record<string, { x: number; y: number }>>({});
     const [hoverMeta, setHoverMeta] = useState<{ title: string; text: string; x: number; y: number } | null>(null);
@@ -99,18 +101,8 @@ export default function DeriveAssetYields({ asset, darkMode }: { asset: 'HYPE' |
     const [excludedExp, setExcludedExp] = useState<Set<string>>(new Set());
     const [countdown, setCountdown] = useState(15);
 
-    const assetSymbol = useMemo(() => {
-        if (asset === 'BTC') return '₿';
-        if (asset === 'ETH') return 'Ξ';
-        return asset;
-    }, [asset]);
-
-    const strikeRange = useMemo(() => {
-        if (asset === 'BTC') return 20000;
-        if (asset === 'ETH') return 800;
-        if (asset === 'SOL') return 50;
-        return 20; // HYPE
-    }, [asset]);
+    const assetSymbol = cfg.symbol;
+    const strikeRange = cfg.strikeRange;
 
     const { computedCall, computedPut } = useMemo(() => {
         if (!trades.length) return { computedCall: null, computedPut: null };
@@ -143,6 +135,9 @@ export default function DeriveAssetYields({ asset, darkMode }: { asset: 'HYPE' |
 
     useEffect(() => {
         setLoading(true); setOpts([]); setSpot(null); setDvol(null);
+        // Suppresses state writes from a tick that is still in-flight when the
+        // asset changes or the component unmounts (prevents stale/overlapping writes).
+        let aborted = false;
         const go = async () => {
             setCountdown(15);
             const ns: Record<string, Status> = { spot: 'load', opt: 'load', dvol: 'load' };
@@ -150,30 +145,38 @@ export default function DeriveAssetYields({ asset, darkMode }: { asset: 'HYPE' |
             try {
                 const r = await fetch('/api/derive/ticker', { method: 'POST', body: JSON.stringify({ instrument_name: `${asset}-PERP` }) });
                 const d = await r.json(); currentSpot = +(d.result?.mark_price || 0);
-                if (currentSpot > 0) { setSpot({ v: currentSpot, c: 0, cp: 0 }); ns.spot = 'ok'; } else ns.spot = 'err';
+                if (currentSpot > 0) { if (!aborted) setSpot({ v: currentSpot, c: 0, cp: 0 }); ns.spot = 'ok'; } else ns.spot = 'err';
             } catch { ns.spot = 'err'; }
             try {
                 const r = await fetch('/api/derive/instruments', { method: 'POST', body: JSON.stringify({ currency: asset, instrument_type: 'option', expired: false }) });
-                const d = await r.json(); if (!d.result?.length) { ns.opt = 'err'; setLoading(false); setSt(ns as any); return; }
+                const d = await r.json(); if (aborted) return; if (!d.result?.length) { ns.opt = 'err'; setLoading(false); setSt(ns as any); return; }
                 const exps = new Set<string>(); d.result.forEach((it: any) => { const p = it.instrument_name.split('-'); if (p.length === 4) exps.add(p[1]); });
-                const now = Date.now(); const arr: ParsedOption[] = [];
+                const now = Date.now();
                 const expsArray = Array.from(exps);
-                for (const exp of expsArray) {
-                    const tr = await fetch('/api/derive/tickers', { method: 'POST', body: JSON.stringify({ currency: asset, instrument_type: 'option', expiry_date: exp }) });
-                    const td = await tr.json(); if (!td.result?.tickers) continue;
-                    for (const [name, it] of Object.entries<any>(td.result.tickers)) {
-                        const info = parseInst(name); if (!info || !it.M || it.M <= 0) continue;
-                        const ed = expiryToDate(info.expiry); const dte = Math.max(0, Math.ceil((ed.getTime() - now) / 86400000)); if (dte <= 0) continue;
-                        const mp = +it.M; const bp = +(it.b || it.best_bid || 0); const ap = +(it.a || it.best_ask || 0); const up = +(it.option_pricing?.f || it.I || 0); const iv = +(it.option_pricing?.i || 0) * 100;
-                        if (up <= 0) continue;
-                        const y = info.expiry.slice(2, 4); const m = +info.expiry.slice(4, 6) - 1; const dt = info.expiry.slice(6, 8);
-                        const M = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
-                        const greeks = MathUtils.calculateGreeks(up, info.strike, dte / 365, iv / 100, info.type);
-                        const pExVal = MathUtils.calculateProbExercise(up, info.strike, dte / 365, iv / 100, info.type);
-                        const tailLoss = MathUtils.calculateTailLoss(up, info.strike, dte / 365, iv / 100, info.type);
-                        arr.push({ instrument: name, strike: info.strike, expiry: `${dt}${M[m]}${y}`, expiryTs: ed.getTime(), type: info.type, markPrice: mp, bidPrice: bp, askPrice: ap, markIv: iv, futuresPrice: up, dte, greeks, probExercise: pExVal, tailLoss });
-                    }
-                }
+                // Fetch each expiry's ticker chain concurrently. This was a
+                // sequential waterfall (~7 serialized round-trips, re-run every
+                // 15s); Promise.all collapses it to a single round-trip's latency.
+                const perExpiry = await Promise.all(expsArray.map(async (exp) => {
+                    const out: ParsedOption[] = [];
+                    try {
+                        const tr = await fetch('/api/derive/tickers', { method: 'POST', body: JSON.stringify({ currency: asset, instrument_type: 'option', expiry_date: exp }) });
+                        const td = await tr.json(); if (!td.result?.tickers) return out;
+                        for (const [name, it] of Object.entries<any>(td.result.tickers)) {
+                            const info = parseInst(name); if (!info || !it.M || it.M <= 0) continue;
+                            const ed = expiryToDate(info.expiry); const dte = Math.max(0, Math.ceil((ed.getTime() - now) / 86400000)); if (dte <= 0) continue;
+                            const mp = +it.M; const bp = +(it.b || it.best_bid || 0); const ap = +(it.a || it.best_ask || 0); const up = +(it.option_pricing?.f || it.I || 0); const iv = +(it.option_pricing?.i || 0) * 100;
+                            if (up <= 0) continue;
+                            const y = info.expiry.slice(2, 4); const m = +info.expiry.slice(4, 6) - 1; const dt = info.expiry.slice(6, 8);
+                            const M = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+                            const greeks = MathUtils.calculateGreeks(up, info.strike, dte / 365, iv / 100, info.type);
+                            const pExVal = MathUtils.calculateProbExercise(up, info.strike, dte / 365, iv / 100, info.type);
+                            const tailLoss = MathUtils.calculateTailLoss(up, info.strike, dte / 365, iv / 100, info.type);
+                            out.push({ instrument: name, strike: info.strike, expiry: `${dt}${M[m]}${y}`, expiryTs: ed.getTime(), type: info.type, markPrice: mp, bidPrice: bp, askPrice: ap, markIv: iv, futuresPrice: up, dte, greeks, probExercise: pExVal, tailLoss });
+                        }
+                    } catch { /* skip this expiry if its ticker fetch fails */ }
+                    return out;
+                }));
+                const arr: ParsedOption[] = perExpiry.flat();
                 if (arr.length > 0) {
                     ns.opt = 'ok';
                     if (currentSpot > 0) {
@@ -200,7 +203,7 @@ export default function DeriveAssetYields({ asset, darkMode }: { asset: 'HYPE' |
                     }
 
                     // Deribit Arbitrage Fetching
-                    if (asset === 'BTC' || asset === 'ETH') {
+                    if (cfg.deribitArb) {
                         try {
                             const dr = await fetch(`https://www.deribit.com/api/v2/public/get_book_summary_by_currency?currency=${asset}&kind=option`);
                             const dd = await dr.json();
@@ -225,11 +228,12 @@ export default function DeriveAssetYields({ asset, darkMode }: { asset: 'HYPE' |
                         setDeribitPrices({ mark: {}, bid: {}, ask: {} });
                     }
                 } else ns.opt = 'err';
+                if (aborted) return;
                 setOpts(arr); setLoading(false); setDataAt(new Date());
-            } catch { ns.opt = 'err'; setLoading(false); }
-            setSt(ns as any);
+            } catch { ns.opt = 'err'; if (!aborted) setLoading(false); }
+            if (!aborted) setSt(ns as any);
         };
-        go(); const iv = setInterval(go, 15000); return () => clearInterval(iv);
+        go(); const iv = setInterval(go, 15000); return () => { aborted = true; clearInterval(iv); };
     }, [asset]);
 
     useEffect(() => {
@@ -238,7 +242,7 @@ export default function DeriveAssetYields({ asset, darkMode }: { asset: 'HYPE' |
             const t: SuggestedTrade[] = [];
             for (const o of opts) {
                 if (o.dte <= 7 || excludedExp.has(o.expiry)) continue;
-                const ref = spot?.v || 30; if (Math.abs(o.strike - ref) > strikeRange) continue;
+                const ref = spot?.v || cfg.fallbackSpot; if (Math.abs(o.strike - ref) > strikeRange) continue;
                 if ((o.type === 'C' && o.strike < ref) || (o.type === 'P' && o.strike > ref)) continue;
                 const price = priceSource === 'market'
                     ? (o.bidPrice || o.markPrice * 0.95)
@@ -263,7 +267,7 @@ export default function DeriveAssetYields({ asset, darkMode }: { asset: 'HYPE' |
         const expsArr: { label: string; ts: number; dte: number; fp: number }[] = [];
         em.forEach((v, k) => { expsArr.push({ label: k, ...v }); });
         const exps = expsArr.sort((a, b) => a.ts - b.ts);
-        const ref = spot?.v || exps[0]?.fp || 30;
+        const ref = spot?.v || exps[0]?.fp || cfg.fallbackSpot;
         const fFiltered = f.filter(o => Math.abs(o.strike - ref) <= strikeRange && (o.type === 'C' ? o.strike >= ref : o.strike <= ref));
 
         const pK: number[] = [];
@@ -417,7 +421,7 @@ export default function DeriveAssetYields({ asset, darkMode }: { asset: 'HYPE' |
                         const isCall = i === 0;
                         const accent = isCall ? 'var(--yellow)' : 'var(--green)';
                         const dir = isCall ? 'below' : 'above';
-                        const pDec = asset === 'BTC' || asset === 'ETH' ? 0 : 2;
+                        const pDec = cfg.priceDecimals;
                         if (!l) return <div key={i} style={{ border: '1px solid var(--border-color)', background: 'var(--bg-card)', padding: '6px', borderRadius: '4px', color: 'var(--text-muted)', fontSize: 'var(--t-data)' }}>No {isCall ? 'CALL' : 'PUT'} strategies found</div>;
 
                         const { legs, score, totalPrem, avgApy, topFactor, probAllOTM, ev, evAnnual, thetaEff, volEdge, kelly, riskReturn } = l;
@@ -469,9 +473,9 @@ export default function DeriveAssetYields({ asset, darkMode }: { asset: 'HYPE' |
                                         </>;
                                     })()}
                                     <br />
-                                    <MetaLabel title="Expected Value (EV)" text="Theoretical Average Profit/Loss per trade based on historical probabilities and payoffs." label="EV (1H):" /> ${(ev / legs.length).toFixed(pDec)} (${(evAnnual / legs.length).toFixed(pDec)}/yr) · <MetaLabel title="P(any exercise)" text="The probability that at least one of the option legs in this strategy will be exercised (In-The-Money at expiry)." label="P(any ex):" /> <span style={{ color: accent, fontWeight: 600 }}>{(probAnyEx * 100).toFixed(0)}%</span> · <MetaLabel title="Theta (θ)" text="Measures the time decay of the option price. It represents the value the option loses each day as it approaches expiration." label="θ (1H):" /> ${(thetaEff / legs.length).toFixed(pDec)}/d
+                                    <MetaLabel title="Expected Value (EV)" text="Expected P/L for the short position: premium collected minus the option's unconditional expected exercise payoff (Black-Scholes)." label="EV (1H):" /> ${(ev / legs.length).toFixed(pDec)} (${(evAnnual / legs.length).toFixed(pDec)}/yr) · <MetaLabel title="P(any exercise)" text="The probability that at least one of the option legs in this strategy will be exercised (In-The-Money at expiry)." label="P(any ex):" /> <span style={{ color: accent, fontWeight: 600 }}>{(probAnyEx * 100).toFixed(0)}%</span> · <MetaLabel title="Premium / day" text="Premium amortized over days to expiry (premium ÷ DTE) — a decay proxy for the seller, NOT the Black-Scholes theta greek." label="Prem/day:" /> ${(thetaEff / legs.length).toFixed(pDec)}/d
                                     <br />
-                                    <MetaLabel title="Volatility Edge" text="Difference between Option IV and the benchmark volatility index (DVOL). Positive means receiving more premium than historical benchmarking suggests." label="Vol edge:" /> {(volEdge * 100).toFixed(1)}% vs DVOL · <MetaLabel title="Kelly Criterion" text="Optimal fraction of capital to allocate based on edge vs variance. Higher = more confident bet. Used by professional traders for position sizing." label="Kelly:" /> {(kelly * 100).toFixed(1)}% · <MetaLabel title="Risk/Reward Ratio" text="Total Strategy Score based on Yield, Risk, and Greeks. Represents expected Return over Potential risk." label="R/R:" /> {riskReturn.toFixed(2)}
+                                    <MetaLabel title="Volatility Edge (skew)" text="This strike's IV minus the current at-the-money term-structure IV. A same-snapshot SKEW reading, not a historical richness benchmark — positive means this strike is bid up vs ATM." label="Vol edge:" /> {(volEdge * 100).toFixed(1)}% vs ATM · <MetaLabel title="Edge Score (heuristic)" text="Internal edge-vs-variance ranking heuristic. NOT the literal Kelly criterion — do not use it to size capital." label="Edge:" /> {(kelly * 100).toFixed(1)}% · <MetaLabel title="Risk/Reward Ratio" text="Total Strategy Score based on Yield, Risk, and Greeks. Represents expected Return over Potential risk." label="R/R:" /> {riskReturn.toFixed(2)}
                                     <br />
                                     {asset} stays {dir} all strikes by {uniqueExpiries} → keep <span style={{ color: accent, fontWeight: 600 }}>${(totalPrem / legs.length).toFixed(pDec)} · {(totalPrem / legs.length / (spot?.v || legs[0].futuresPrice)).toFixed(4)}{assetSymbol}</span>
                                 </div>
@@ -591,8 +595,8 @@ function Tooltip({ tip, onClose, priceSource, inline, assetSymbol, onHoverMeta }
                     <MetaLabel title="Gamma (Γ)" text="Measures the rate of change in Delta for every $1 change in the underlying asset's price. Highlights the sensitivity of Delta." label="Gamma (Γ)" />
                     <span style={{ color: 'var(--text-primary)', fontWeight: 600, textAlign: 'right' }}>{tip.d.greeks?.gamma?.toFixed(5)}</span>
 
-                    <MetaLabel title="Theta (Θ)" text="Measures the time decay of the option price. It represents the value the option loses each day as it approaches expiration." label="Theta (Θ)" />
-                    <span style={{ color: 'var(--text-primary)', fontWeight: 600, textAlign: 'right' }}>{tip.d.greeks?.theta?.toFixed(2)}</span>
+                    <MetaLabel title="Theta (Θ) — seller" text="Daily time decay shown from the seller's side: positive = premium you collect per day as the option decays toward expiry." label="Theta (Θ)" />
+                    <span style={{ color: 'var(--text-primary)', fontWeight: 600, textAlign: 'right' }}>{(-(tip.d.greeks?.theta ?? 0)).toFixed(2)}</span>
 
                     <MetaLabel title="Vega (ν)" text="Measures the sensitivity of the option price to a 1% change in the implied volatility (IV) of the underlying asset." label="Vega (ν)" />
                     <span style={{ color: 'var(--text-primary)', fontWeight: 600, textAlign: 'right' }}>{tip.d.greeks?.vega?.toFixed(2)}</span>

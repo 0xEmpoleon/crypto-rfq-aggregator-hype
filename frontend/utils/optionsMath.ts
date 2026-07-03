@@ -117,8 +117,14 @@ export function scoreStrategy(legs: any[], dvolVal: number | null) {
         const T = l.dte / 365;
         const pITM = l.probExercise;
         const tailLoss = l.tailLoss;
-        const ev = l.premiumUsd * (1 - pITM) - tailLoss * pITM;
-        const maxLoss = l.type === 'Put' ? Math.max(0, tailLoss) : l.futuresPrice * sigma * 2 * Math.sqrt(T);
+        // Short-seller EV: the premium is collected in EVERY scenario, and
+        // `tailLoss` (calculateTailLoss) is already the UNCONDITIONAL expected
+        // ITM payoff, so it must not be re-weighted by pITM. EV = credit − E[payoff].
+        const ev = l.premiumUsd - tailLoss;
+        // Structural worst case (probability-free severity). For a cash-secured
+        // put, the collateral can go to zero → strike − premium. `totalRisk`
+        // below applies pITM once, giving a proper probability-weighted risk.
+        const maxLoss = l.type === 'Put' ? Math.max(0, l.strike - l.premiumUsd) : l.futuresPrice * sigma * 2 * Math.sqrt(T);
 
         totalEv += ev;
         totalRisk += pITM * maxLoss;

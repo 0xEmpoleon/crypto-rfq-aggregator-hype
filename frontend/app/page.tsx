@@ -2,16 +2,17 @@
 
 import React, { useEffect, useState } from 'react';
 import DeriveAssetYields from '../components/DeriveAssetYields';
+import { ASSETS, AssetSymbol } from '../config/assets';
 
 export default function Dashboard() {
     const [darkMode, setDarkMode] = useState(true);
-    const [asset, setAsset] = useState<'BTC' | 'ETH' | 'SOL' | 'HYPE'>('HYPE');
+    const [asset, setAsset] = useState<AssetSymbol>('HYPE');
 
     useEffect(() => {
         document.documentElement.setAttribute('data-theme', darkMode ? 'dark' : 'light');
     }, [darkMode]);
 
-    const assets: ('BTC' | 'ETH' | 'SOL' | 'HYPE')[] = ['BTC', 'ETH', 'SOL', 'HYPE'];
+    const assets: readonly AssetSymbol[] = ASSETS;
 
     return (
         <main className="container">

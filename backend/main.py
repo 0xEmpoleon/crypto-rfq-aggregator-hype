@@ -65,7 +65,10 @@ app = FastAPI(title="Crypto Deribit Option Strategist", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    # Wildcard origin + credentials is rejected by browsers and is a security
+    # smell. This API serves only public market data (no cookies/auth), so
+    # credentials are disabled. Set explicit origins if auth is ever added.
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )

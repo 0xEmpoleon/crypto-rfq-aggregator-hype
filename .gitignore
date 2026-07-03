@@ -5,3 +5,12 @@ node_modules
 .next
 .vercel
 *.log
+
+# Python virtualenvs (never commit)
+venv/
+.venv/
+
+# Build/tooling artifacts
+*.tsbuildinfo
+backend/backend-logs.txt
+.DS_Store
