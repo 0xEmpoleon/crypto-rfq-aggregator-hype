@@ -1,17 +1,14 @@
-import { NextResponse } from 'next/server';
+import { forwardToDerive, badRequest, CURRENCY_RE, EXPIRY_RE } from '../_upstream';
 
-export async function POST(req: Request) {
-    try {
-        const body = await req.json();
-        const res = await fetch('https://api.lyra.finance/public/get_tickers', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body),
-        });
-        const data = await res.json();
-        console.log(`[Proxy] Fetched ${body.expiry_date} - Status: ${res.status}, Entries: ${data.result?.tickers ? Object.keys(data.result.tickers).length : 'None'}`);
-        return NextResponse.json(data);
-    } catch (e) {
-        return NextResponse.json({ error: 'Failed to fetch tickers' }, { status: 500 });
-    }
+export async function GET(req: Request) {
+    const params = new URL(req.url).searchParams;
+    const currency = params.get('currency') || '';
+    const expiry = params.get('expiry_date') || '';
+    if (!CURRENCY_RE.test(currency)) return badRequest('currency must be an uppercase symbol');
+    if (!EXPIRY_RE.test(expiry)) return badRequest('expiry_date must be YYYYMMDD');
+    return forwardToDerive('/public/get_tickers', {
+        currency,
+        instrument_type: 'option',
+        expiry_date: expiry,
+    });
 }

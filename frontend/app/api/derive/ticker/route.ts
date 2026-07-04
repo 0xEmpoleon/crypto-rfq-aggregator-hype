@@ -1,16 +1,7 @@
-import { NextResponse } from 'next/server';
+import { forwardToDerive, badRequest, PERP_RE } from '../_upstream';
 
-export async function POST(req: Request) {
-    try {
-        const body = await req.json();
-        const res = await fetch('https://api.lyra.finance/public/get_ticker', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body),
-        });
-        const data = await res.json();
-        return NextResponse.json(data);
-    } catch (e) {
-        return NextResponse.json({ error: 'Failed to fetch ticker' }, { status: 500 });
-    }
+export async function GET(req: Request) {
+    const name = new URL(req.url).searchParams.get('instrument_name') || '';
+    if (!PERP_RE.test(name)) return badRequest('instrument_name must be a <CURRENCY>-PERP symbol');
+    return forwardToDerive('/public/get_ticker', { instrument_name: name });
 }

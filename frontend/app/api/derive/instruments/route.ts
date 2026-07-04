@@ -1,16 +1,11 @@
-import { NextResponse } from 'next/server';
+import { forwardToDerive, badRequest, CURRENCY_RE } from '../_upstream';
 
-export async function POST(req: Request) {
-    try {
-        const body = await req.json();
-        const res = await fetch('https://api.lyra.finance/public/get_instruments', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body),
-        });
-        const data = await res.json();
-        return NextResponse.json(data);
-    } catch (e) {
-        return NextResponse.json({ error: 'Failed to fetch instruments' }, { status: 500 });
-    }
+export async function GET(req: Request) {
+    const currency = new URL(req.url).searchParams.get('currency') || '';
+    if (!CURRENCY_RE.test(currency)) return badRequest('currency must be an uppercase symbol');
+    return forwardToDerive('/public/get_instruments', {
+        currency,
+        instrument_type: 'option',
+        expired: false,
+    });
 }
