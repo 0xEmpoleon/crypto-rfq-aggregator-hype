@@ -28,13 +28,25 @@ export function MetaTooltip({ tip }: { tip: MetaTip }) {
     );
 }
 
-export function Tooltip({ tip, onClose, priceSource, inline, assetSymbol, onHoverMeta }: {
-    tip: HoverTip; onClose?: () => void; priceSource: string; inline?: boolean;
+/**
+ * Cell detail card, rendered by the page root at fixed viewport coordinates
+ * (never inside the scroll-clipped tables). With `onClose` it is an
+ * interactive pinned card; without, a pass-through hover tooltip.
+ */
+export function Tooltip({ tip, onClose, priceSource, assetSymbol, onHoverMeta }: {
+    tip: HoverTip; onClose?: () => void; priceSource: string;
     assetSymbol: string; onHoverMeta: (m: MetaTip | null) => void;
 }) {
-    const style: React.CSSProperties = inline
-        ? { position: 'absolute', top: '-10px', left: '100%', marginLeft: '10px', backgroundColor: 'var(--bg-main)', border: '1px solid var(--border-strong)', padding: '10px', borderRadius: '6px', zIndex: 9999, boxShadow: '0 10px 30px rgba(0,0,0,0.9), inset 0 0 0 1px rgba(255,255,255,0.05)', width: '16rem', textAlign: 'left', pointerEvents: 'auto' }
-        : { position: 'fixed', top: tip.y || 100, left: (tip.x || 100) + 15, backgroundColor: 'var(--bg-main)', border: '1px solid var(--border-strong)', padding: '10px', borderRadius: '6px', zIndex: 9999, boxShadow: '0 10px 30px rgba(0,0,0,0.9), inset 0 0 0 1px rgba(255,255,255,0.05)', width: '16rem', pointerEvents: 'none' };
+    const vw = typeof window !== 'undefined' ? window.innerWidth : 1600;
+    const vh = typeof window !== 'undefined' ? window.innerHeight : 900;
+    const style: React.CSSProperties = {
+        position: 'fixed',
+        top: Math.max(8, Math.min((tip.y || 100), vh - 430)),
+        left: Math.max(8, Math.min((tip.x || 100) + 15, vw - 275)),
+        backgroundColor: 'var(--bg-main)', border: '1px solid var(--border-strong)', padding: '10px',
+        borderRadius: '6px', zIndex: 9999, boxShadow: '0 10px 30px rgba(0,0,0,0.9), inset 0 0 0 1px rgba(255,255,255,0.05)',
+        width: '16rem', textAlign: 'left', pointerEvents: onClose ? 'auto' : 'none',
+    };
 
     const d = tip.d;
     const feeUsd = d.feeUsd ?? deriveTakerFee(d.futuresPrice, d.premiumUsd);

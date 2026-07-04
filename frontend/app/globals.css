@@ -218,4 +218,10 @@ body {
   .neo-panel {
     overflow-x: auto;
   }
+
+  /* Cap each matrix so it scrolls internally — keeps the sticky
+     strike/expiry header working while the page itself also scrolls. */
+  .table-scroll {
+    max-height: 70vh;
+  }
 }

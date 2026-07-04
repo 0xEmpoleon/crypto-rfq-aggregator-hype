@@ -42,13 +42,12 @@ export default function Dashboard() {
                         </span>
                     </div>
                     <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
-                        <div style={{ display: 'flex', background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: '4px', overflow: 'hidden', flexWrap: 'wrap' }} role="tablist" aria-label="Underlying asset">
+                        <div style={{ display: 'flex', background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: '4px', overflow: 'hidden', flexWrap: 'wrap' }} role="group" aria-label="Underlying asset">
                             {ASSETS.map((a, i) => (
                                 <button
                                     key={a}
                                     onClick={() => setAsset(a)}
-                                    role="tab"
-                                    aria-selected={asset === a}
+                                    aria-pressed={asset === a}
                                     style={{
                                         background: asset === a ? 'var(--border-strong)' : 'transparent',
                                         border: 'none', padding: '4px 12px', cursor: 'pointer',
@@ -61,7 +60,7 @@ export default function Dashboard() {
                         </div>
                         <button
                             onClick={() => setDarkMode(!darkMode)}
-                            aria-pressed={!darkMode}
+                            aria-label={darkMode ? 'Switch to light theme' : 'Switch to dark theme'}
                             style={{
                                 background: 'var(--bg-card)',
                                 border: '1px solid var(--border-color)',

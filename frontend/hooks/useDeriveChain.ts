@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import * as MathUtils from '../utils/optionsMath';
 import { parseInst, expiryToDate, expiryLabel } from '../utils/instruments';
 import { POLL_INTERVAL_MS } from '../config/constants';
@@ -41,7 +41,6 @@ export function useDeriveChain(asset: AssetSymbol): DeriveChain {
     const [st, setSt] = useState<FeedStatus>({ spot: 'load', opt: 'load', dvol: 'load' });
     const [countdown, setCountdown] = useState(POLL_INTERVAL_MS / 1000);
     const [refreshKey, setRefreshKey] = useState(0);
-    const inFlight = useRef(false);
 
     const refresh = useCallback(() => setRefreshKey(k => k + 1), []);
 
@@ -51,14 +50,17 @@ export function useDeriveChain(asset: AssetSymbol): DeriveChain {
     }, []);
 
     useEffect(() => {
-        setLoading(true); setOpts([]); setSpot(null); setDvol(null); setAtmIvByExpiry({});
+        setLoading(true); setOpts([]); setSpot(null); setDvol(null); setAtmIvByExpiry({}); setDataAt(null);
         setSt({ spot: 'load', opt: 'load', dvol: 'load' });
         const ctrl = new AbortController();
         const { signal } = ctrl;
+        // Per-effect-instance guard: an aborted run from a previous asset (whose
+        // `finally` hasn't flushed yet) must never block THIS asset's first fetch.
+        let inFlight = false;
 
         const go = async () => {
-            if (inFlight.current) return;
-            inFlight.current = true;
+            if (inFlight) return;
+            inFlight = true;
             setCountdown(POLL_INTERVAL_MS / 1000);
             const ns: FeedStatus = { spot: 'load', opt: 'load', dvol: 'load' };
             try {
@@ -152,7 +154,7 @@ export function useDeriveChain(asset: AssetSymbol): DeriveChain {
             } catch {
                 if (!signal.aborted) { ns.opt = 'err'; setLoading(false); }
             } finally {
-                inFlight.current = false;
+                inFlight = false;
             }
             if (!signal.aborted) setSt(ns);
         };

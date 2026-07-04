@@ -1,6 +1,6 @@
 "use client";
 import React, { memo } from 'react';
-import type { CellData, DeribitMaps, ExpiryCol, HoverTip, MetaTip } from '../types';
+import type { CellData, DeribitMaps, ExpiryCol, HoverTip } from '../types';
 import { MatrixCell } from './MatrixCell';
 
 export interface YieldMatrixProps {
@@ -23,8 +23,12 @@ export interface YieldMatrixProps {
     onRetry: () => void;
     onHover: (tip: HoverTip | null) => void;
     onTogglePin: (k: string, x: number, y: number) => void;
-    onHoverMeta: (m: MetaTip | null) => void;
 }
+
+const SIDES = [
+    { t: 'C' as const, title: 'COVERED CALLS', accent: 'var(--yellow)' },
+    { t: 'P' as const, title: 'CASH SECURED PUTS', accent: 'var(--green)' },
+];
 
 /**
  * The two strike×expiry heat-map tables. Memoized: hover state lives in the
@@ -33,10 +37,12 @@ export interface YieldMatrixProps {
 export const YieldMatrix = memo(function YieldMatrix({
     exps, putK, callK, cells, recommendedKeys, excludedExp, maxPexCap, deribitPrices,
     priceSource, darkMode, assetSymbol, pinnedLocs, spot, strikeRange, loading, hasError,
-    onRetry, onHover, onTogglePin, onHoverMeta,
+    onRetry, onHover, onTogglePin,
 }: YieldMatrixProps) {
 
     const centered: React.CSSProperties = { flex: '1 1 auto', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '8px', color: 'var(--text-secondary)', fontSize: 'var(--t-data)', minHeight: '120px' };
+    // Cells color against whichever Deribit side is actually compared in this mode.
+    const dbitMap = priceSource === 'mark' ? deribitPrices.mark : deribitPrices.bid;
 
     let body: React.ReactNode;
     if (loading && !exps.length) {
@@ -53,9 +59,12 @@ export const YieldMatrix = memo(function YieldMatrix({
     } else {
         body = (
             <div className="two-col" style={{ flex: '1 1 auto', overflow: 'hidden' }}>
-                {(['C', 'P'] as const).map(t => (
+                {SIDES.map(({ t, title, accent }) => (
                     <div key={t} style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-                        <div style={{ overflow: 'auto', flex: '1 1 auto' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '12px', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '4px', flex: '0 0 auto' }}>
+                            <span style={{ width: '8px', height: '2px', backgroundColor: accent, borderRadius: '1px' }}></span> {title}
+                        </div>
+                        <div className="table-scroll" style={{ overflow: 'auto', flex: '1 1 auto' }}>
                             <table style={{ width: '100%', borderCollapse: 'collapse', borderSpacing: 0 }}>
                                 <caption className="sr-only">{t === 'C' ? 'Covered call' : 'Cash-secured put'} net APR by strike and expiry</caption>
                                 <thead style={{ position: 'sticky', top: 0, backgroundColor: 'var(--bg-panel)', zIndex: 10 }}>
@@ -70,8 +79,6 @@ export const YieldMatrix = memo(function YieldMatrix({
                                             <th scope="row" style={{ fontSize: '12px', fontWeight: 700, padding: '4px', borderBottom: '1px solid var(--border-color)', color: 'var(--text-primary)', textAlign: 'center' }}>${s.toLocaleString()}</th>
                                             {exps.map(e => {
                                                 const k = `${t}-${s}-${e.label}`;
-                                                const d = cells[k];
-                                                const dbit = priceSource === 'mark' ? deribitPrices.mark[k] : deribitPrices.bid[k];
                                                 return (
                                                     <MatrixCell
                                                         key={k}
@@ -79,18 +86,16 @@ export const YieldMatrix = memo(function YieldMatrix({
                                                         type={t}
                                                         strike={s}
                                                         expLabel={e.label}
-                                                        data={d}
+                                                        data={cells[k]}
                                                         isRec={recommendedKeys.has(k)}
                                                         isExcluded={excludedExp.has(e.label)}
-                                                        overCap={!!d && d.probExercise * 100 > maxPexCap}
-                                                        pinnedPos={pinnedLocs[k]}
-                                                        dbitPrice={dbit}
+                                                        overCap={!!cells[k] && cells[k].probExercise * 100 > maxPexCap}
+                                                        isPinned={!!pinnedLocs[k]}
+                                                        dbitPrice={dbitMap[k]}
                                                         darkMode={darkMode}
                                                         assetSymbol={assetSymbol}
-                                                        priceSource={priceSource}
                                                         onHover={onHover}
                                                         onTogglePin={onTogglePin}
-                                                        onHoverMeta={onHoverMeta}
                                                     />
                                                 );
                                             })}
@@ -107,25 +112,16 @@ export const YieldMatrix = memo(function YieldMatrix({
 
     return (
         <div className="neo-panel" style={{ flex: '1 1 auto', display: 'flex', flexDirection: 'column', minHeight: 0, marginTop: '0px', padding: '5px 12px 12px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '4px', flexWrap: 'wrap', gap: '4px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '6px', flexWrap: 'wrap', gap: '4px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                     <span style={{ fontSize: '15px', color: 'var(--yellow)', filter: 'drop-shadow(0 0 4px rgba(234,179,8,0.5))', lineHeight: 1 }} aria-hidden>⚡</span>
                     <div style={{ fontSize: '15px', fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.01em' }}>Covered Yield Matrix</div>
                 </div>
                 <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
                     Cell: <span style={{ color: 'var(--text-secondary)' }}>net APR%</span> · <span style={{ color: 'var(--text-secondary)' }}>P(ex)%</span> · <span style={{ color: 'var(--text-secondary)' }}>premium ({assetSymbol})</span>
-                    {Object.keys(deribitPrices.mark).length > 0 && <> · vs Deribit: <span style={{ color: 'var(--green)' }}>richer</span>/<span style={{ color: 'var(--red)' }}>cheaper</span></>}
+                    {Object.keys(dbitMap).length > 0 && <> · vs Deribit: <span style={{ color: 'var(--green)' }}>richer</span>/<span style={{ color: 'var(--red)' }}>cheaper</span></>}
                 </div>
                 <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)' }}>Spot: <span style={{ color: 'var(--blue)' }}>{spot != null ? `$${spot.toLocaleString()}` : '—'}</span></div>
-            </div>
-
-            <div className="two-col" style={{ marginBottom: '8px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '12px', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-                    <span style={{ width: '8px', height: '2px', backgroundColor: 'var(--yellow)', borderRadius: '1px' }}></span> COVERED CALLS
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '12px', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-                    <span style={{ width: '8px', height: '2px', backgroundColor: 'var(--green)', borderRadius: '1px' }}></span> CASH SECURED PUTS
-                </div>
             </div>
 
             {body}

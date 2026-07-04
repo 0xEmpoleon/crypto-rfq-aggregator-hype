@@ -42,8 +42,10 @@ export default function DeriveAssetYields({ asset, darkMode }: { asset: AssetSym
             const raw = localStorage.getItem(CONTROLS_LS_KEY);
             if (raw) {
                 const c = JSON.parse(raw);
-                if (typeof c.maxPexCap === 'number') setMaxPexCap(c.maxPexCap);
-                if (typeof c.numLegs === 'number') setNumLegs(c.numLegs);
+                // Clamp to the sliders' ranges — a hand-edited value like numLegs=-1
+                // would otherwise recurse the combination generator to a stack overflow.
+                if (Number.isFinite(c.maxPexCap)) setMaxPexCap(Math.min(90, Math.max(5, Math.trunc(c.maxPexCap))));
+                if (Number.isFinite(c.numLegs)) setNumLegs(Math.min(5, Math.max(0, Math.trunc(c.numLegs))));
                 if (typeof c.allowRep === 'boolean') setAllowRep(c.allowRep);
                 if (c.priceSource === 'mark' || c.priceSource === 'market') setPriceSource(c.priceSource);
             }
@@ -58,6 +60,7 @@ export default function DeriveAssetYields({ asset, darkMode }: { asset: AssetSym
         setExcludedExp(new Set());
         setPinnedLocs({});
         setHoverTip(null);
+        setHoverMeta(null);
     }, [asset]);
 
     const trades = useMemo<StrategyLeg[]>(() => {
@@ -194,14 +197,30 @@ export default function DeriveAssetYields({ asset, darkMode }: { asset: AssetSym
                 deribitPrices={deribitPrices} priceSource={priceSource} darkMode={darkMode}
                 assetSymbol={cfg.symbol} pinnedLocs={pinnedLocs} spot={spot} strikeRange={cfg.strikeRange}
                 loading={loading} hasError={st.opt === 'err'} onRetry={refresh}
-                onHover={onHover} onTogglePin={onTogglePin} onHoverMeta={onHoverMeta}
+                onHover={onHover} onTogglePin={onTogglePin}
             />
 
             <div style={{ flex: '0 0 auto', padding: '2px 0', fontSize: 'var(--t-micro)', color: 'var(--text-muted)', textAlign: 'center' }}>
                 Market data: Derive & Deribit public APIs · yields are estimates net of est. taker fees · nothing here is financial advice — for education only.
             </div>
 
-            {hoverTip && (
+            {/* Pinned detail cards render here at fixed viewport coordinates so the
+                tables' scroll containers can never clip them. A pin whose cell
+                vanished (e.g. bid dried up in Market mode) simply shows nothing. */}
+            {Object.entries(pinnedLocs).map(([k, pos]) => {
+                const d = cells[k];
+                if (!d) return null;
+                const [t, strikeStr, ...expParts] = k.split('-');
+                return (
+                    <Tooltip
+                        key={k}
+                        tip={{ d: { ...d, type: t === 'P' ? 'Put' : 'Call', strike: Number(strikeStr), exp: expParts.join('-') }, x: pos.x, y: pos.y }}
+                        onClose={() => onTogglePin(k, 0, 0)}
+                        priceSource={priceSource} assetSymbol={cfg.symbol} onHoverMeta={onHoverMeta}
+                    />
+                );
+            })}
+            {hoverTip && !pinnedLocs[`${hoverTip.d.type === 'Put' ? 'P' : 'C'}-${hoverTip.d.strike}-${hoverTip.d.exp}`] && (
                 <Tooltip tip={hoverTip} priceSource={priceSource} assetSymbol={cfg.symbol} onHoverMeta={onHoverMeta} />
             )}
             {hoverMeta && <MetaTooltip tip={hoverMeta} />}

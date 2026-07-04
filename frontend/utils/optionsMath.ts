@@ -215,9 +215,12 @@ export function scoreStrategy(legs: StrategyLeg[], ctx: LadderContext) {
     const avgDte = dteExactSum / n;
     const fp0 = legs[0].futuresPrice;
     const avgApr = totalApr / n;
-    const evAnnual = totalEv * (365 / avgDte);
+    // Ranking factors must be INTENSIVE (per-contract), not extensive sums —
+    // otherwise a 5-leg ladder mechanically posts ~5× the EV/theta of a
+    // 1-leg one and Auto mode always picks the maximum leg count.
+    const evAnnual = (totalEv / n) * (365 / avgDte);
     const volEdge = volEdgeCount > 0 ? volEdgeSum / volEdgeCount : 0;
-    const thetaEff = thetaSum;
+    const thetaEff = thetaSum / n;
     const riskReturn = totalRisk > 0 ? totalEv / totalRisk : 0;
 
     const maxPex = Math.max(...legs.map(l => l.probExercise));
@@ -326,6 +329,16 @@ export function generateLadderCandidates(trades: StrategyLeg[], type: 'Call' | '
 
     const all = Array.from(unique.values()).sort((a, b) => b.apr - a.apr);
     const allCandidates: any[] = [];
+    // One dedupe across BOTH generation passes — a single-expiry combo that is
+    // also inside the top-APR pool must not be counted twice (poolSize gates
+    // the "carries ranking information" check in the UI).
+    const seen = new Set<string>();
+    const pushCombo = (combo: StrategyLeg[]) => {
+        const key = combo.map(x => `${x.strike}-${x.expiry}`).sort().join('|');
+        if (seen.has(key)) return;
+        seen.add(key);
+        allCandidates.push({ legs: combo, ...scoreStrategy(combo, ctx) });
+    };
 
     const perExpiryCap = allowRep ? Math.min(5, numLegs + 2) : Math.max(8, numLegs + 5);
     const byExpiry = new Map<string, StrategyLeg[]>();
@@ -339,23 +352,14 @@ export function generateLadderCandidates(trades: StrategyLeg[], type: 'Call' | '
         const opts = expTrades.sort((a, b) => type === 'Call' ? a.strike - b.strike : b.strike - a.strike).slice(0, perExpiryCap);
         if (!allowRep && opts.length < numLegs) continue;
         const combos = allowRep ? combinationsWithRep(opts, numLegs) : combinations(opts, numLegs);
-        for (const combo of combos) {
-            allCandidates.push({ legs: combo, ...scoreStrategy(combo, ctx) });
-        }
+        for (const combo of combos) pushCombo(combo);
     }
 
     const topCap = allowRep ? 8 : 15;
     const top = all.slice(0, topCap);
     if ((allowRep && top.length > 0) || (!allowRep && top.length >= numLegs)) {
-        const seen = new Set<string>();
         const combos = allowRep ? combinationsWithRep(top, numLegs) : combinations(top, numLegs);
-        for (const combo of combos) {
-            const key = combo.map((x) => `${x.strike}-${x.expiry}`).sort().join('|');
-            if (!seen.has(key)) {
-                seen.add(key);
-                allCandidates.push({ legs: combo, ...scoreStrategy(combo, ctx) });
-            }
-        }
+        for (const combo of combos) pushCombo(combo);
     }
 
     return allCandidates;
