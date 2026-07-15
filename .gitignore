@@ -1,16 +1,20 @@
-*.pyc
-__pycache__
-.env
+# Dependencies & build output
 node_modules
 .next
 .vercel
-*.log
+out
 
-# Python virtualenvs (never commit)
-venv/
-.venv/
+# Env & secrets
+.env
+.env.*
+!.env.example
 
-# Build/tooling artifacts
+# Tooling artifacts
 *.tsbuildinfo
-backend/backend-logs.txt
+*.log
 .DS_Store
+
+# Test artifacts (Playwright)
+/frontend/test-results
+/frontend/playwright-report
+/frontend/.playwright
