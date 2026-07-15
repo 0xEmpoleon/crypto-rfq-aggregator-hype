@@ -1,17 +1,34 @@
 "use client";
-import React from 'react';
+import React, { useState, useCallback } from 'react';
 import type { HoverTip, MetaTip, Status } from '../types';
 import { deriveTakerFee } from '../utils/optionsMath';
+import { deriveTradeUrl } from '../utils/instruments';
 
-/** Dashed-underline label that explains itself in a MetaTooltip on hover. */
+/**
+ * Dashed-underline label that explains itself in a MetaTooltip. Reachable by
+ * mouse (hover), keyboard (focus), AND touch (tap) — the explanation is the
+ * only place several metrics are defined, so it must not be hover-only.
+ */
 export function MetaLabel({ title, text, label, onHoverMeta }: {
     title: string; text: string; label: string;
     onHoverMeta: (m: MetaTip | null) => void;
 }) {
+    const show = useCallback((el: HTMLElement) => {
+        const r = el.getBoundingClientRect();
+        onHoverMeta({ title, text, x: r.left + r.width / 2, y: r.bottom });
+    }, [title, text, onHoverMeta]);
+    const hide = useCallback(() => onHoverMeta(null), [onHoverMeta]);
     return (
         <span
+            role="button"
+            tabIndex={0}
+            aria-label={`${label} explanation`}
             onMouseEnter={(e) => onHoverMeta({ title, text, x: e.clientX, y: e.clientY })}
-            onMouseLeave={() => onHoverMeta(null)}
+            onMouseLeave={hide}
+            onFocus={(e) => show(e.currentTarget)}
+            onBlur={hide}
+            onClick={(e) => { e.stopPropagation(); show(e.currentTarget); }}
+            onKeyDown={(e) => { if (e.key === 'Escape') hide(); }}
             style={{ borderBottom: '1px dashed var(--text-muted)', cursor: 'help', textUnderlineOffset: '2px' }}
         >
             {label}
@@ -20,10 +37,19 @@ export function MetaLabel({ title, text, label, onHoverMeta }: {
 }
 
 export function MetaTooltip({ tip }: { tip: MetaTip }) {
+    const vw = typeof window !== 'undefined' ? window.innerWidth : 1600;
+    const vh = typeof window !== 'undefined' ? window.innerHeight : 900;
     return (
-        <div style={{ position: 'fixed', top: tip.y + 15, left: tip.x - 100, backgroundColor: 'rgba(15, 23, 42, 0.95)', border: '1px solid rgba(255,255,255,0.1)', padding: '10px', borderRadius: '4px', zIndex: 10000, boxShadow: '0 10px 25px rgba(0,0,0,0.5)', width: '220px', pointerEvents: 'none', color: '#fff', fontSize: '11px', lineHeight: '1.4', backdropFilter: 'blur(4px)' }}>
-            <div style={{ fontWeight: 800, marginBottom: '4px', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '3px', color: 'var(--yellow)', fontSize: '10px', textTransform: 'uppercase' }}>{tip.title}</div>
-            {tip.text}
+        <div style={{
+            position: 'fixed',
+            top: Math.max(8, Math.min(tip.y + 15, vh - 130)),
+            left: Math.max(8, Math.min(tip.x - 100, vw - 236)),
+            backgroundColor: 'var(--bg-panel)', border: '1px solid var(--border-strong)', padding: '10px',
+            borderRadius: '4px', zIndex: 10000, boxShadow: '0 10px 25px rgba(0,0,0,0.4)', width: '220px',
+            pointerEvents: 'none', color: 'var(--text-primary)', fontSize: '11px', lineHeight: '1.4',
+        }}>
+            <div style={{ fontWeight: 800, marginBottom: '4px', borderBottom: '1px solid var(--border-color)', paddingBottom: '3px', color: 'var(--yellow)', fontSize: '10px', textTransform: 'uppercase' }}>{tip.title}</div>
+            <span style={{ color: 'var(--text-secondary)' }}>{tip.text}</span>
         </div>
     );
 }
@@ -33,15 +59,15 @@ export function MetaTooltip({ tip }: { tip: MetaTip }) {
  * (never inside the scroll-clipped tables). With `onClose` it is an
  * interactive pinned card; without, a pass-through hover tooltip.
  */
-export function Tooltip({ tip, onClose, priceSource, assetSymbol, onHoverMeta }: {
+export function Tooltip({ tip, onClose, priceSource, assetSymbol, asset, onHoverMeta }: {
     tip: HoverTip; onClose?: () => void; priceSource: string;
-    assetSymbol: string; onHoverMeta: (m: MetaTip | null) => void;
+    assetSymbol: string; asset: string; onHoverMeta: (m: MetaTip | null) => void;
 }) {
     const vw = typeof window !== 'undefined' ? window.innerWidth : 1600;
     const vh = typeof window !== 'undefined' ? window.innerHeight : 900;
     const style: React.CSSProperties = {
         position: 'fixed',
-        top: Math.max(8, Math.min((tip.y || 100), vh - 430)),
+        top: Math.max(8, Math.min((tip.y || 100), vh - 470)),
         left: Math.max(8, Math.min((tip.x || 100) + 15, vw - 275)),
         backgroundColor: 'var(--bg-main)', border: '1px solid var(--border-strong)', padding: '10px',
         borderRadius: '6px', zIndex: 9999, boxShadow: '0 10px 30px rgba(0,0,0,0.9), inset 0 0 0 1px rgba(255,255,255,0.05)',
@@ -51,6 +77,10 @@ export function Tooltip({ tip, onClose, priceSource, assetSymbol, onHoverMeta }:
     const d = tip.d;
     const feeUsd = d.feeUsd ?? deriveTakerFee(d.futuresPrice, d.premiumUsd);
     const netPrem = Math.max(0, d.premiumUsd - feeUsd);
+    const [copied, setCopied] = useState(false);
+    const copyName = () => {
+        try { navigator.clipboard?.writeText(d.instrument); setCopied(true); setTimeout(() => setCopied(false), 1200); } catch { /* blocked */ }
+    };
 
     return (
         <div style={style}>
@@ -67,7 +97,7 @@ export function Tooltip({ tip, onClose, priceSource, assetSymbol, onHoverMeta }:
                 <span>Expiry</span><span style={{ color: 'var(--text-primary)', fontWeight: 700, textAlign: 'right' }}>{d.exp} ({d.dte.toFixed(0)}d)</span>
                 <span>IV</span><span style={{ color: 'var(--text-primary)', fontWeight: 700, textAlign: 'right' }}>{d.markIv?.toFixed(1)}%</span>
                 <span>Prem $ ({priceSource})</span><span style={{ color: 'var(--text-primary)', fontWeight: 700, textAlign: 'right' }}>${d.premiumUsd?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                <MetaLabel title="Estimated fee" text="Derive taker fee: $0.50 base + 0.04% of spot notional, capped at 12.5% of the option's value. Per 1 contract; makers pay less." label="Est. fee" onHoverMeta={onHoverMeta} />
+                <MetaLabel title="Estimated fee" text="Derive fee estimate at the selected role; makers pay less than takers. Capped at 12.5% of the option's value." label="Est. fee" onHoverMeta={onHoverMeta} />
                 <span style={{ color: 'var(--red)', fontWeight: 600, textAlign: 'right' }}>−${feeUsd.toFixed(2)}</span>
                 <span>Net prem</span><span style={{ color: 'var(--text-primary)', fontWeight: 700, textAlign: 'right' }}>${netPrem.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                 <span>Prem {assetSymbol}</span><span style={{ color: 'var(--text-primary)', fontWeight: 700, textAlign: 'right' }}>{(d.premiumUsd / d.futuresPrice)?.toFixed(4)} {assetSymbol}</span>
@@ -97,6 +127,15 @@ export function Tooltip({ tip, onClose, priceSource, assetSymbol, onHoverMeta }:
                 <span style={{ color: 'var(--text-muted)', fontSize: '10px', fontWeight: 600 }}>EST. APR · NET FEES</span>
                 <span style={{ fontWeight: 800, fontSize: '16px', color: 'var(--text-primary)' }}>{d.apr.toFixed(1)}%</span>
             </div>
+
+            {onClose && (
+                <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid var(--border-strong)', display: 'flex', alignItems: 'center', gap: '8px', justifyContent: 'space-between', fontSize: '10px' }}>
+                    <button type="button" onClick={copyName} title={`Copy ${d.instrument}`} style={{ background: 'none', border: '1px solid var(--border-strong)', borderRadius: '3px', padding: '2px 6px', cursor: 'pointer', color: copied ? 'var(--green)' : 'var(--text-secondary)', fontFamily: 'inherit', fontSize: '10px' }}>
+                        {copied ? '✓ copied' : '⧉ copy name'}
+                    </button>
+                    <a href={deriveTradeUrl(asset)} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--blue)', fontWeight: 600, textDecoration: 'none' }}>Trade on Derive ↗</a>
+                </div>
+            )}
         </div>
     );
 }

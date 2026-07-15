@@ -39,5 +39,11 @@ export async function forwardToDerive(path: string, body: Record<string, unknown
     } catch {
         return NextResponse.json({ error: 'Upstream returned non-JSON' }, { status: 502 });
     }
+    // Derive returns application errors as HTTP 200 JSON-RPC bodies. Without
+    // this, a `{"error":{...}}` response would be cached as a healthy 200 and
+    // served to every user for the whole TTL. Surface it as an uncached 502.
+    if (data && typeof data === 'object' && 'error' in data && (data as { error?: unknown }).error) {
+        return NextResponse.json(data, { status: 502 });
+    }
     return NextResponse.json(data, { headers: { 'Cache-Control': CACHE_HEADER } });
 }

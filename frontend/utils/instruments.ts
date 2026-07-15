@@ -14,6 +14,12 @@ export function parseInst(n: string): InstrumentInfo | null {
     return p.length === 4 ? { expiry: p[1], strike: +p[2].replace('_', '.'), type: p[3] as 'C' | 'P' } : null;
 }
 
+/** Deep link to Derive's options trade ticket for an asset. Derive has no
+ *  per-instrument URL, so the copyable instrument name locates the strike. */
+export function deriveTradeUrl(asset: string): string {
+    return `https://app.derive.xyz/trade/options?symbol=${encodeURIComponent(asset)}`;
+}
+
 /** Derive options expire 08:00 UTC on the expiry date. */
 export function expiryToDate(e: string): Date {
     const y = +e.slice(0, 4);

@@ -35,17 +35,20 @@ export const MatrixCell = memo(function MatrixCell({
     const isP = isPinned;
     const tipData = (): HoverTip['d'] => ({ ...d, type: type === 'P' ? 'Put' : 'Call', strike, exp: expLabel });
 
-    // Cross-venue coloring: green = Derive premium richer than Deribit's
-    // (better for a seller), red = cheaper.
+    // Cross-venue signal vs Deribit — encoded by a direction GLYPH (not colour
+    // alone, which would collide with the green=puts heat and fail for
+    // colour-blind users): ▲ richer (better for a seller), ▼ cheaper.
     let priceColor = 'var(--text-primary)';
+    let venueGlyph = '';
+    let venueLabel = '';
     if (dbitPrice && !isExcluded) {
-        if (d.premiumUsd > dbitPrice * 1.001) priceColor = 'var(--green)';
-        else if (d.premiumUsd < dbitPrice * 0.999) priceColor = 'var(--red)';
+        if (d.premiumUsd > dbitPrice * 1.001) { priceColor = 'var(--green)'; venueGlyph = '▲'; venueLabel = ', premium richer than Deribit'; }
+        else if (d.premiumUsd < dbitPrice * 0.999) { priceColor = 'var(--red)'; venueGlyph = '▼'; venueLabel = ', premium cheaper than Deribit'; }
     }
 
     const bg = heatColor(d.apr, type, darkMode);
     const premAsset = d.premiumUsd / d.futuresPrice;
-    const label = `${type === 'P' ? 'Put' : 'Call'} ${strike} ${expLabel}: ${d.apr.toFixed(1)} percent net APR, ${(d.probExercise * 100).toFixed(0)} percent exercise probability`;
+    const label = `${type === 'P' ? 'Put' : 'Call'} ${strike} ${expLabel}: ${d.apr.toFixed(1)} percent net APR, ${(d.probExercise * 100).toFixed(0)} percent exercise probability${venueLabel}`;
 
     // The pinned detail card itself is rendered by the page root at fixed
     // viewport coordinates (see DeriveAssetYields) so it can never be clipped
@@ -82,7 +85,16 @@ export const MatrixCell = memo(function MatrixCell({
                     <span style={{ fontSize: '12px' }}>{d.apr.toFixed(1)}%</span>
                     <span style={{ fontSize: '10px', opacity: 0.6 }}>{(d.probExercise * 100).toFixed(0)}%</span>
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'center', fontSize: '10px', color: priceColor, opacity: isRec ? 1 : 0.7, fontWeight: dbitPrice ? 700 : 400, marginTop: '1px' }}>
+                <div style={{
+                    display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '2px', fontSize: '10px',
+                    color: priceColor,
+                    // Compared cells stay full-opacity with a lift shadow so the
+                    // coloured text is legible over the translucent heat fill.
+                    opacity: venueGlyph ? 1 : (isRec ? 1 : 0.7),
+                    fontWeight: venueGlyph ? 700 : 400, marginTop: '1px',
+                    textShadow: venueGlyph ? (darkMode ? '0 0 3px rgba(2,6,23,0.9)' : '0 0 3px rgba(255,255,255,0.9)') : 'none',
+                }}>
+                    {venueGlyph && <span aria-hidden style={{ fontSize: '8px' }}>{venueGlyph}</span>}
                     {premAsset.toFixed(4)}{assetSymbol}
                 </div>
             </div>

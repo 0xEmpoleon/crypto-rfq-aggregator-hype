@@ -21,7 +21,8 @@ export interface ParsedOption {
 
 /** Everything a matrix cell needs to render and explain itself. */
 export interface CellData {
-    apr: number;          // net of estimated taker fees
+    instrument: string;   // Derive instrument name, e.g. "BTC-20260704-63000-C"
+    apr: number;          // net of estimated fees
     markIv: number;
     markPrice: number;
     bidPrice: number;

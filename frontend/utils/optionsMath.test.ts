@@ -7,6 +7,8 @@ import {
     calculatePutApr,
     calculateCallApr,
     deriveTakerFee,
+    deriveMakerFee,
+    deriveFee,
     scoreStrategy,
     rankLadders,
     findBestLadder,
@@ -101,6 +103,24 @@ describe('deriveTakerFee', () => {
     });
 });
 
+describe('deriveMakerFee / deriveFee role dispatch', () => {
+    it('maker (0.03%, no base) is cheaper than taker for the same row when under the cap', () => {
+        // $60k notional, $1000 premium: maker 0.0003·60000 = $18 vs taker $24.5
+        expect(deriveMakerFee(60000, 1000)).toBeCloseTo(18, 9);
+        expect(deriveMakerFee(60000, 1000)).toBeLessThan(deriveTakerFee(60000, 1000));
+    });
+    it('the 12.5%-of-premium cap binds taker (base fee dominates) but not tiny maker fees', () => {
+        // $40 notional, $2 premium (cap 0.25): taker 0.5+0.016=0.516 → capped 0.25;
+        // maker 0.0003·40 = 0.012 stays well under the cap.
+        expect(deriveTakerFee(40, 2)).toBeCloseTo(0.25, 9);
+        expect(deriveMakerFee(40, 2)).toBeCloseTo(0.012, 9);
+    });
+    it('deriveFee dispatches by role', () => {
+        expect(deriveFee(60000, 1000, 'maker')).toBeCloseTo(deriveMakerFee(60000, 1000), 9);
+        expect(deriveFee(60000, 1000, 'taker')).toBeCloseTo(deriveTakerFee(60000, 1000), 9);
+    });
+});
+
 function mkLeg(over: Partial<StrategyLeg>): StrategyLeg {
     return {
         instrument: 'X', type: 'Put', strike: 90, expiry: '4JUL26',
@@ -128,9 +148,37 @@ describe('scoreStrategy', () => {
     it('masks EV under mark pricing and vol edge without an ATM reference', () => {
         const mark = scoreStrategy([mkLeg({})], { ...ctx, priceSource: 'mark' });
         expect(mark.factorMask[0]).toBe(false);
+        expect(mark.evIsIndependent).toBe(false);
         const noAtm = scoreStrategy([mkLeg({ expiry: 'UNKNOWN' })], ctx);
         expect(noAtm.factorMask[1]).toBe(false);
         expect(noAtm.volEdge).toBe(0);
+    });
+
+    it('unmasks EV under mark pricing when a Deribit fair value covers every leg', () => {
+        const mCtx: LadderContext = { ...ctx, priceSource: 'mark', deribitMarkByKey: { 'P-90-4JUL26': 1.0 } };
+        const s = scoreStrategy([mkLeg({})], mCtx);
+        expect(s.evIsIndependent).toBe(true);
+        expect(s.factorMask[0]).toBe(true);
+        // EV = netPrem − Deribit mark = (2 − 0.25) − 1.0 = 0.75, not the ~0 own-model value
+        expect(s.ev).toBeCloseTo(0.75, 9);
+        // A leg without Deribit coverage keeps EV masked
+        const partial = scoreStrategy([mkLeg({}), mkLeg({ strike: 85 })], mCtx);
+        expect(partial.evIsIndependent).toBe(false);
+    });
+
+    it('risk severity is symmetric across puts and calls (Risk/Return comparable)', () => {
+        // Identical numeric inputs, only the type differs → identical riskReturn.
+        // (The old code charged puts strike-to-zero but calls a 2σ proxy → not comparable.)
+        const put = scoreStrategy([mkLeg({ type: 'Put' })], ctx);
+        const call = scoreStrategy([mkLeg({ type: 'Call' })], ctx);
+        expect(call.riskReturn).toBeCloseTo(put.riskReturn, 9);
+    });
+
+    it('reports a displayed max loss (collateral → 0, net of premium) per type', () => {
+        const put = scoreStrategy([mkLeg({ type: 'Put' })], ctx);   // strike 90 − netPrem 1.75
+        expect(put.maxLossUsd).toBeCloseTo(88.25, 9);
+        const call = scoreStrategy([mkLeg({ type: 'Call' })], ctx); // futures 100 − netPrem 1.75
+        expect(call.maxLossUsd).toBeCloseTo(98.25, 9);
     });
 
     it('ranking factors are intensive: N identical legs score like 1 leg', () => {

@@ -1,7 +1,7 @@
 "use client";
 import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import * as MathUtils from '../utils/optionsMath';
-import type { StrategyLeg, LadderContext } from '../utils/optionsMath';
+import type { StrategyLeg, LadderContext, FeeRole } from '../utils/optionsMath';
 import { AssetSymbol, ASSET_CONFIG } from '../config/assets';
 import { MIN_DTE_DAYS, APR_MIN_PCT, APR_MAX_PCT, RECOMMEND_MIN_SCORE, TRADE_POOL_MIN } from '../config/constants';
 import { useDeriveChain } from '../hooks/useDeriveChain';
@@ -30,6 +30,8 @@ export default function DeriveAssetYields({ asset, darkMode }: { asset: AssetSym
     const [numLegs, setNumLegs] = useState(0);
     const [allowRep, setAllowRep] = useState(false);
     const [priceSource, setPriceSource] = useState<'mark' | 'market'>('mark');
+    const [feeRole, setFeeRole] = useState<FeeRole>('maker');
+    const [contracts, setContracts] = useState(1);
     const [excludedExp, setExcludedExp] = useState<Set<string>>(new Set());
     const [controlsLoaded, setControlsLoaded] = useState(false);
 
@@ -48,14 +50,16 @@ export default function DeriveAssetYields({ asset, darkMode }: { asset: AssetSym
                 if (Number.isFinite(c.numLegs)) setNumLegs(Math.min(5, Math.max(0, Math.trunc(c.numLegs))));
                 if (typeof c.allowRep === 'boolean') setAllowRep(c.allowRep);
                 if (c.priceSource === 'mark' || c.priceSource === 'market') setPriceSource(c.priceSource);
+                if (c.feeRole === 'maker' || c.feeRole === 'taker') setFeeRole(c.feeRole);
+                if (Number.isFinite(c.contracts)) setContracts(Math.min(10000, Math.max(1, Math.trunc(c.contracts))));
             }
         } catch { /* corrupted or unavailable storage is fine */ }
         setControlsLoaded(true);
     }, []);
     useEffect(() => {
         if (!controlsLoaded) return;
-        try { localStorage.setItem(CONTROLS_LS_KEY, JSON.stringify({ maxPexCap, numLegs, allowRep, priceSource })); } catch { }
-    }, [maxPexCap, numLegs, allowRep, priceSource, controlsLoaded]);
+        try { localStorage.setItem(CONTROLS_LS_KEY, JSON.stringify({ maxPexCap, numLegs, allowRep, priceSource, feeRole, contracts })); } catch { }
+    }, [maxPexCap, numLegs, allowRep, priceSource, feeRole, contracts, controlsLoaded]);
     useEffect(() => {
         setExcludedExp(new Set());
         setPinnedLocs({});
@@ -75,7 +79,7 @@ export default function DeriveAssetYields({ asset, darkMode }: { asset: AssetSym
             // resting bid is skipped, never priced at a synthetic 95% of mark.
             if (priceSource === 'market' && o.bidPrice <= 0) continue;
             const price = priceSource === 'market' ? o.bidPrice : o.markPrice;
-            const feeUsd = MathUtils.deriveTakerFee(o.futuresPrice, price);
+            const feeUsd = MathUtils.deriveFee(o.futuresPrice, price, feeRole);
             const netPrem = Math.max(0, price - feeUsd);
             const days = o.tYears * 365;
             const apr = o.type === 'P'
@@ -93,17 +97,24 @@ export default function DeriveAssetYields({ asset, darkMode }: { asset: AssetSym
         }
         t.sort((a, b) => b.apr - a.apr);
         return t.slice(0, Math.max(TRADE_POOL_MIN, numLegs * 4));
-    }, [opts, spot, cfg, maxPexCap, priceSource, excludedExp, numLegs]);
+    }, [opts, spot, cfg, maxPexCap, priceSource, feeRole, excludedExp, numLegs]);
+
+    // Deribit marks (BTC/ETH only) serve as an independent fair value so the
+    // EV factor can be scored — and unmasked — even under default MARK pricing.
+    const deribitMarkByKey = useMemo(
+        () => (cfg.deribitArb ? deribitPrices.mark : undefined),
+        [cfg.deribitArb, deribitPrices.mark]
+    );
 
     const { callRes, putRes } = useMemo<{ callRes: LadderResult | null; putRes: LadderResult | null }>(() => {
         if (!trades.length) return { callRes: null, putRes: null };
-        const ctx: LadderContext = { atmIvByExpiry, priceSource };
+        const ctx: LadderContext = { atmIvByExpiry, priceSource, deribitMarkByKey };
         const legCounts = numLegs === 0 ? [1, 2, 3, 4, 5] : [numLegs];
         return {
             callRes: MathUtils.findBestLadder(trades, 'Call', ctx, legCounts, allowRep),
             putRes: MathUtils.findBestLadder(trades, 'Put', ctx, legCounts, allowRep),
         };
-    }, [trades, atmIvByExpiry, priceSource, numLegs, allowRep]);
+    }, [trades, atmIvByExpiry, priceSource, deribitMarkByKey, numLegs, allowRep]);
 
     const recommendedKeys = useMemo(() => {
         const s = new Set<string>();
@@ -134,11 +145,12 @@ export default function DeriveAssetYields({ asset, darkMode }: { asset: AssetSym
         fFiltered.forEach(o => {
             if (priceSource === 'market' && o.bidPrice <= 0) return; // unquotable — renders as "—"
             const price = priceSource === 'market' ? o.bidPrice : o.markPrice;
-            const feeUsd = MathUtils.deriveTakerFee(o.futuresPrice, price);
+            const feeUsd = MathUtils.deriveFee(o.futuresPrice, price, feeRole);
             const netPrem = Math.max(0, price - feeUsd);
             const days = o.tYears * 365;
             if (o.type === 'P') pS.add(o.strike); else cS.add(o.strike);
             cells[`${o.type}-${o.strike}-${o.expiry}`] = {
+                instrument: o.instrument,
                 apr: o.type === 'P'
                     ? MathUtils.calculatePutApr(netPrem, o.strike, days)
                     : MathUtils.calculateCallApr(netPrem, o.futuresPrice, days),
@@ -148,7 +160,7 @@ export default function DeriveAssetYields({ asset, darkMode }: { asset: AssetSym
             };
         });
         return { exps, putK: Array.from(pS).sort((a, b) => b - a), callK: Array.from(cS).sort((a, b) => a - b), cells };
-    }, [opts, spot, priceSource, cfg]);
+    }, [opts, spot, priceSource, feeRole, cfg]);
 
     const onHover = useCallback((tip: HoverTip | null) => setHoverTip(tip), []);
     const onHoverMeta = useCallback((m: MetaTip | null) => setHoverMeta(m), []);
@@ -167,6 +179,21 @@ export default function DeriveAssetYields({ asset, darkMode }: { asset: AssetSym
     const onAllowRep = useCallback((v: boolean) => setAllowRep(v), []);
     const onNumLegs = useCallback((v: number) => setNumLegs(v), []);
     const onMaxPexCap = useCallback((v: number) => setMaxPexCap(v), []);
+    const onFeeRole = useCallback((r: FeeRole) => setFeeRole(r), []);
+    const onContracts = useCallback((v: number) => setContracts(Math.min(10000, Math.max(1, Math.trunc(v) || 1))), []);
+
+    // Escape dismisses any open pinned card / metric tooltip — a keyboard user
+    // who pinned a cell can always close it without hunting for the × button.
+    useEffect(() => {
+        const onKey = (e: KeyboardEvent) => {
+            if (e.key !== 'Escape') return;
+            setPinnedLocs(p => (Object.keys(p).length ? {} : p));
+            setHoverMeta(null);
+            setHoverTip(null);
+        };
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+    }, []);
 
     const staleWithData = st.opt === 'err' && opts.length > 0;
 
@@ -174,8 +201,10 @@ export default function DeriveAssetYields({ asset, darkMode }: { asset: AssetSym
         <div style={{ display: 'flex', flexDirection: 'column', flex: '1 1 auto', minHeight: 0, overflow: 'hidden', gap: '2px' }}>
             <ControlBar
                 st={st} allowRep={allowRep} numLegs={numLegs} maxPexCap={maxPexCap}
+                feeRole={feeRole} contracts={contracts}
                 dataAt={dataAt} countdown={countdown}
                 onAllowRep={onAllowRep} onNumLegs={onNumLegs} onMaxPexCap={onMaxPexCap}
+                onFeeRole={onFeeRole} onContracts={onContracts}
             />
 
             {staleWithData && (
@@ -187,7 +216,8 @@ export default function DeriveAssetYields({ asset, darkMode }: { asset: AssetSym
 
             <StrategyPanel
                 call={callRes} put={putRes} asset={asset} spot={spot} dvol={dvol}
-                priceSource={priceSource} exps={exps} excludedExp={excludedExp} loading={loading}
+                priceSource={priceSource} feeRole={feeRole} contracts={contracts}
+                exps={exps} excludedExp={excludedExp} loading={loading}
                 onPriceSource={onPriceSource} onToggleExp={onToggleExp} onHoverMeta={onHoverMeta}
             />
 
@@ -216,12 +246,12 @@ export default function DeriveAssetYields({ asset, darkMode }: { asset: AssetSym
                         key={k}
                         tip={{ d: { ...d, type: t === 'P' ? 'Put' : 'Call', strike: Number(strikeStr), exp: expParts.join('-') }, x: pos.x, y: pos.y }}
                         onClose={() => onTogglePin(k, 0, 0)}
-                        priceSource={priceSource} assetSymbol={cfg.symbol} onHoverMeta={onHoverMeta}
+                        priceSource={priceSource} assetSymbol={cfg.symbol} asset={asset} onHoverMeta={onHoverMeta}
                     />
                 );
             })}
             {hoverTip && !pinnedLocs[`${hoverTip.d.type === 'Put' ? 'P' : 'C'}-${hoverTip.d.strike}-${hoverTip.d.exp}`] && (
-                <Tooltip tip={hoverTip} priceSource={priceSource} assetSymbol={cfg.symbol} onHoverMeta={onHoverMeta} />
+                <Tooltip tip={hoverTip} priceSource={priceSource} assetSymbol={cfg.symbol} asset={asset} onHoverMeta={onHoverMeta} />
             )}
             {hoverMeta && <MetaTooltip tip={hoverMeta} />}
         </div>

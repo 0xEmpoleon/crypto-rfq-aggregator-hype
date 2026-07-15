@@ -7,16 +7,22 @@ import { ASSETS, AssetSymbol } from '../config/assets';
 const VIEW_LS_KEY = 'optionStrategist.view.v1';
 
 export default function Dashboard() {
+    // Stable default for SSR AND the first client render — React state must not
+    // depend on the DOM during hydration. The dark→light FLASH is prevented by
+    // the blocking <head> script (it stamps data-theme + CSS before paint); we
+    // just mirror that decision into state on mount.
     const [darkMode, setDarkMode] = useState(true);
     const [asset, setAsset] = useState<AssetSymbol>('HYPE');
     const [hydrated, setHydrated] = useState(false);
 
     useEffect(() => {
+        // Adopt whatever the blocking script already applied (localStorage / OS),
+        // so the toggle label and later syncs match the painted theme.
+        if (document.documentElement.dataset.theme === 'light') setDarkMode(false);
         try {
             const raw = localStorage.getItem(VIEW_LS_KEY);
             if (raw) {
                 const v = JSON.parse(raw);
-                if (typeof v.darkMode === 'boolean') setDarkMode(v.darkMode);
                 if (ASSETS.includes(v.asset)) setAsset(v.asset);
             }
         } catch { /* storage unavailable */ }
@@ -27,9 +33,12 @@ export default function Dashboard() {
         try { localStorage.setItem(VIEW_LS_KEY, JSON.stringify({ darkMode, asset })); } catch { }
     }, [darkMode, asset, hydrated]);
 
+    // Only sync the attribute AFTER mount, so we never clobber the script's
+    // pre-paint value before we've adopted it (which would re-introduce a flash).
     useEffect(() => {
+        if (!hydrated) return;
         document.documentElement.setAttribute('data-theme', darkMode ? 'dark' : 'light');
-    }, [darkMode]);
+    }, [darkMode, hydrated]);
 
     return (
         <main className="container">
@@ -49,10 +58,10 @@ export default function Dashboard() {
                                     onClick={() => setAsset(a)}
                                     aria-pressed={asset === a}
                                     style={{
-                                        background: asset === a ? 'var(--border-strong)' : 'transparent',
+                                        background: asset === a ? 'var(--active-bg)' : 'transparent',
                                         border: 'none', padding: '4px 12px', cursor: 'pointer',
                                         borderLeft: i > 0 ? '1px solid var(--border-color)' : 'none',
-                                        fontSize: 'var(--t-label)', fontWeight: 600, color: asset === a ? 'var(--text-primary)' : 'var(--text-secondary)'
+                                        fontSize: 'var(--t-label)', fontWeight: 600, color: asset === a ? 'var(--active-fg)' : 'var(--text-secondary)'
                                     }}>
                                     {a}
                                 </button>
@@ -73,7 +82,7 @@ export default function Dashboard() {
                                 fontFamily: 'var(--font-ui)',
                                 transition: 'background 0.15s',
                             }}
-                            onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--border-strong)')}
+                            onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--active-bg)')}
                             onMouseLeave={(e) => (e.currentTarget.style.background = 'var(--bg-card)')}
                         >
                             {darkMode ? '☀ Light' : '🌙 Dark'}

@@ -49,9 +49,15 @@ export function useDeriveChain(asset: AssetSymbol): DeriveChain {
         return () => clearInterval(t);
     }, []);
 
+    // Hard reset happens ONLY on asset change — never on a manual refresh(), so
+    // the "Retry now" button on the stale-data banner keeps the old matrix on
+    // screen while it re-fetches instead of blanking it.
     useEffect(() => {
         setLoading(true); setOpts([]); setSpot(null); setDvol(null); setAtmIvByExpiry({}); setDataAt(null);
         setSt({ spot: 'load', opt: 'load', dvol: 'load' });
+    }, [asset]);
+
+    useEffect(() => {
         const ctrl = new AbortController();
         const { signal } = ctrl;
         // Per-effect-instance guard: an aborted run from a previous asset (whose
@@ -142,7 +148,9 @@ export function useDeriveChain(asset: AssetSymbol): DeriveChain {
                         const iv = (c && p) ? (c.markIv + p.markIv) / 2 : (c?.markIv || p?.markIv || 0);
                         if (iv > 0) {
                             atmMap[label] = iv;
-                            expiryAtms.push({ dte: options[0].dte, iv });
+                            // Exact fractional days, not the ceil'd display dte — a
+                            // 1.1-day expiry must weight variance as 1.1/365, not 2/365.
+                            expiryAtms.push({ dte: options[0].tYears * 365, iv });
                         }
                     });
                     setAtmIvByExpiry(atmMap);

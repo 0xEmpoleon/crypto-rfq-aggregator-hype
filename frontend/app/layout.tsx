@@ -29,13 +29,20 @@ export const metadata: Metadata = {
     },
 };
 
+// Runs before first paint: applies the saved theme (or the OS preference) so
+// light-mode users never see a dark flash. Kept tiny and dependency-free.
+const themeScript = `(function(){try{var d;var v=localStorage.getItem('optionStrategist.view.v1');if(v){var p=JSON.parse(v);if(typeof p.darkMode==='boolean')d=p.darkMode}if(typeof d!=='boolean'){d=!window.matchMedia('(prefers-color-scheme: light)').matches}document.documentElement.setAttribute('data-theme',d?'dark':'light')}catch(e){document.documentElement.setAttribute('data-theme','dark')}})()`;
+
 export default function RootLayout({
     children,
 }: Readonly<{
     children: React.ReactNode;
 }>) {
     return (
-        <html lang="en" className={inter.variable}>
+        <html lang="en" className={inter.variable} suppressHydrationWarning>
+            <head>
+                <script dangerouslySetInnerHTML={{ __html: themeScript }} />
+            </head>
             <body>{children}</body>
         </html>
     );

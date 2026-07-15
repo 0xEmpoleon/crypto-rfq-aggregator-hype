@@ -29,9 +29,12 @@ export interface StrategyLeg {
 export interface LadderContext {
     /** Per-expiry-label ATM IV (%) — vol edge compares a leg to the ATM of its OWN expiry. */
     atmIvByExpiry: Record<string, number>;
-    /** Under 'mark' pricing EV is premium-vs-own-model (tautologically ~0), so it is
-     *  excluded from ranking; under 'market' the bid is independent and EV is real. */
+    /** Under 'mark' pricing EV vs the app's own model is tautologically ~0, so it is
+     *  excluded from ranking unless an independent fair value exists (Deribit / a live bid). */
     priceSource: 'mark' | 'market';
+    /** Optional cross-venue fair value, keyed `TYPE-STRIKE-EXPIRY` (e.g. "C-63000-4JUL26").
+     *  When present for every leg it unmasks the EV factor even under 'mark' pricing. */
+    deribitMarkByKey?: Record<string, number>;
 }
 
 export interface ScoredLadder {
@@ -48,19 +51,28 @@ export interface ScoredLadder {
     probAllOTM: number;
     /** true when the ladder spans more than one expiry — P(any ex) is then only a LOWER bound. */
     crossExpiry: boolean;
+    /** true when EV was scored against an independent fair value (live bid or Deribit mark). */
+    evIsIndependent: boolean;
     totalPrem: number;
     totalFees: number;
+    /** Structural worst case for display only (collateral → 0, net of premium). NOT a ranking input. */
+    maxLossUsd: number;
     avgApr: number;
     factors: number[];
     factorMask: boolean[];
 }
 
 /* ── Derive fee schedule (help.derive.xyz, "What are the fees?") ──────
-   Taker: $0.50 base + 0.04% × spot notional, capped at 12.5% of the
-   option's value. Modeled per 1 contract, taker side (worst case). */
+   Taker: $0.50 base + 0.04% × spot notional. Maker: 0.03% × spot notional,
+   no base fee. Both capped at 12.5% of the option's value. Per 1 contract.
+   Role matters: hitting a resting bid ('market') is a taker fill; getting
+   filled at ~mark by posting a quote ('mark') is a maker fill. */
 export const DERIVE_TAKER_BASE_USD = 0.5;
 export const DERIVE_TAKER_NOTIONAL_RATE = 0.0004;
+export const DERIVE_MAKER_NOTIONAL_RATE = 0.0003;
 export const DERIVE_FEE_CAP_OF_PREMIUM = 0.125;
+
+export type FeeRole = 'maker' | 'taker';
 
 export function deriveTakerFee(spotNotional: number, premiumUsd: number): number {
     if (premiumUsd <= 0 || spotNotional <= 0) return 0;
@@ -68,6 +80,21 @@ export function deriveTakerFee(spotNotional: number, premiumUsd: number): number
         DERIVE_TAKER_BASE_USD + DERIVE_TAKER_NOTIONAL_RATE * spotNotional,
         DERIVE_FEE_CAP_OF_PREMIUM * premiumUsd
     );
+}
+
+export function deriveMakerFee(spotNotional: number, premiumUsd: number): number {
+    if (premiumUsd <= 0 || spotNotional <= 0) return 0;
+    return Math.min(
+        DERIVE_MAKER_NOTIONAL_RATE * spotNotional,
+        DERIVE_FEE_CAP_OF_PREMIUM * premiumUsd
+    );
+}
+
+/** Estimated Derive fee for one contract at the given execution role. */
+export function deriveFee(spotNotional: number, premiumUsd: number, role: FeeRole): number {
+    return role === 'maker'
+        ? deriveMakerFee(spotNotional, premiumUsd)
+        : deriveTakerFee(spotNotional, premiumUsd);
 }
 
 /**
@@ -182,25 +209,45 @@ export function combinationsWithRep<T>(arr: T[], k: number): T[][] {
  */
 export function scoreStrategy(legs: StrategyLeg[], ctx: LadderContext) {
     const n = legs.length;
-    let totalEv = 0, totalRisk = 0, totalPrem = 0, totalFees = 0, totalApr = 0, volEdgeSum = 0, volEdgeCount = 0, thetaSum = 0, dteExactSum = 0;
+    let totalEv = 0, totalRisk = 0, totalPrem = 0, totalFees = 0, totalApr = 0,
+        volEdgeSum = 0, volEdgeCount = 0, thetaSum = 0, dteExactSum = 0,
+        maxLossUsd = 0, independentEvLegs = 0;
 
     for (const l of legs) {
-        const sigma = l.markIv / 100;
         const T = l.tYears;
         const dteExact = Math.max(T * 365, 1 / 24);
         const pITM = l.probExercise;
         const netPrem = Math.max(0, l.premiumUsd - (l.feeUsd || 0));
-        // Short-seller EV: the premium is collected in EVERY scenario, and
-        // `tailLoss` (calculateTailLoss) is already the UNCONDITIONAL expected
-        // ITM payoff, so it must not be re-weighted by pITM. EV = net credit − E[payoff].
-        const ev = netPrem - l.tailLoss;
-        // Structural worst case (probability-free severity). For a cash-secured
-        // put, the collateral can go to zero → strike − premium. `totalRisk`
-        // below applies pITM once, giving a proper probability-weighted risk.
-        const maxLoss = l.type === 'Put' ? Math.max(0, l.strike - netPrem) : l.futuresPrice * sigma * 2 * Math.sqrt(T);
+
+        // Short-seller EV = net credit − expected exercise payoff. The payoff
+        // benchmark is an INDEPENDENT fair value when one exists — a live bid
+        // ('market'), or the matching Deribit mark ('mark') — otherwise the
+        // app's own model, where EV is tautologically ~0 and gets masked below.
+        const dKey = `${l.type === 'Call' ? 'C' : 'P'}-${l.strike}-${l.expiry}`;
+        const deribitMark = ctx.deribitMarkByKey?.[dKey];
+        let ev: number;
+        if (ctx.priceSource === 'market') {
+            ev = netPrem - l.tailLoss;            // live bid vs own model — independent
+            independentEvLegs++;
+        } else if (deribitMark && deribitMark > 0) {
+            ev = netPrem - deribitMark;           // Derive mark vs Deribit fair value — independent
+            independentEvLegs++;
+        } else {
+            ev = netPrem - l.tailLoss;            // own mark vs own model — ≈0 by construction
+        }
+
+        // Ranking severity: model-consistent expected shortfall given exercise
+        // = tailLoss / pITM (tailLoss is the UNCONDITIONAL expected ITM payoff).
+        // pITM-weighting it gives Σ tailLoss — one coherent scale for puts AND
+        // calls, so Risk/Return and Kelly are comparable across both panels.
+        // (The old code charged puts strike-to-zero but calls a 2σ proxy.)
+        totalRisk += l.tailLoss;
+
+        // Structural worst case for DISPLAY only: collateral (strike for CSP,
+        // 1 coin at spot for a covered call) to zero, net of premium.
+        maxLossUsd += Math.max(0, (l.type === 'Put' ? l.strike : l.futuresPrice) - netPrem);
 
         totalEv += ev;
-        totalRisk += pITM * maxLoss;
         totalPrem += l.premiumUsd;
         totalFees += l.feeUsd || 0;
         totalApr += l.apr;
@@ -237,10 +284,12 @@ export function scoreStrategy(legs: StrategyLeg[], ctx: LadderContext) {
 
     const factors = [evAnnual, Math.max(0, volEdge), riskReturn, thetaEff, kelly, diversification];
     // A factor only participates in ranking when it carries information:
-    // EV under 'mark' pricing is premium-vs-own-model (≈0 by construction),
-    // and vol edge is meaningless without an ATM reference for the expiry.
+    // EV needs an independent fair value for EVERY leg (a live bid, or a
+    // Deribit mark) — otherwise it is own-mark-vs-own-model (≈0) and masked;
+    // vol edge is meaningless without an ATM reference for the expiry.
+    const evIsIndependent = independentEvLegs === n;
     const factorMask = [
-        ctx.priceSource === 'market',
+        evIsIndependent,
         volEdgeCount === n,
         true,
         true,
@@ -258,8 +307,10 @@ export function scoreStrategy(legs: StrategyLeg[], ctx: LadderContext) {
         diversification,
         probAllOTM,
         crossExpiry,
+        evIsIndependent,
         totalPrem,
         totalFees,
+        maxLossUsd,
         avgApr,
         factors,
         factorMask,

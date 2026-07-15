@@ -22,8 +22,8 @@
   /* slate-50 */
   --text-secondary: #94A3B8;
   /* slate-400 */
-  --text-muted: #64748B;
-  /* slate-500 */
+  --text-muted: #7C8AA0;
+  /* raised from slate-500 (#64748B, 3.75:1) so small 10–11px labels clear AA */
 
   --border-color: #1E293B;
   /* slate-800 */
@@ -41,6 +41,10 @@
   /* orange-500 — active indicator */
   --yellow: #EAB308;
   /* yellow-500 — calls */
+
+  /* Selected control surface (asset tabs, theme toggle hover) */
+  --active-bg: #334155;
+  --active-fg: #F8FAFC;
 
   /* Typography — Inter is self-hosted via next/font (no render-blocking @import) */
   --font-ui: var(--font-inter), -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -79,12 +83,19 @@
   --border-color: #000000;
   /* solid black borders */
   --border-strong: #000000;
-  --green: #4ADE80;
-  /* Rysk emerald green */
-  --yellow: #D4A017;
-  /* warm gold */
-  --blue: #3B82F6;
+  /* Accents darkened for AA text contrast on the parchment (#4ADE80 was
+     1.5:1, #D4A017 was 2.1:1). The heat-map fill is a separate hardcoded
+     rgba in heatColor(), so it is unaffected. */
+  --green: #15803D;
+  /* emerald-700 */
+  --yellow: #A16207;
+  /* amber-700 */
+  --blue: #2563EB;
   --red: #DC2626;
+  /* Selected control surface — a distinct highlight instead of the black
+     border colour, which was invisible under black text. */
+  --active-bg: #1E293B;
+  --active-fg: #FFFFFF;
 }
 
 /* Reset */
@@ -106,6 +117,38 @@ body {
   color: var(--text-primary);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+/* Keyboard focus — the matrix alone has 100+ tab stops, so a visible ring
+   is essential. Only shown for keyboard focus, never on mouse click. */
+:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 1px;
+  border-radius: 2px;
+}
+
+/* Native controls adopt the theme accent in both light and dark. */
+input[type='range'],
+input[type='checkbox'],
+input[type='number'] {
+  accent-color: var(--blue);
+}
+
+/* Honour the OS "reduce motion" preference. */
+@media (prefers-reduced-motion: reduce) {
+
+  .pulse {
+    animation: none;
+    opacity: 0.75;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 /* Container — viewport-locked */
