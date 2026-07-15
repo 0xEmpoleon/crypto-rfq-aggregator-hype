@@ -29,12 +29,6 @@ jobs:
       - run: npm run typecheck
       - run: npm run test:coverage
       - run: npm run build
-      - name: Upload build for e2e
-        uses: actions/upload-artifact@v4
-        with:
-          name: next-build
-          path: frontend/.next
-          retention-days: 1
 
   e2e:
     needs: check
@@ -51,17 +45,16 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
-      - name: Download build
-        uses: actions/download-artifact@v4
-        with:
-          name: next-build
-          path: frontend/.next
       - name: Cache Playwright browsers
         uses: actions/cache@v4
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}
       - run: npx playwright install --with-deps chromium
+      # Build here rather than passing .next between jobs — upload-artifact@v4
+      # silently drops hidden dirs like .next, and the standalone output has
+      # symlinks that don't survive the round trip. A fresh build is reliable.
+      - run: npm run build
       - run: npm run test:e2e
       - uses: actions/upload-artifact@v4
         if: failure()
