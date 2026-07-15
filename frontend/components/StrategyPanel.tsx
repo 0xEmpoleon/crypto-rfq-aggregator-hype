@@ -1,5 +1,5 @@
 "use client";
-import React, { memo, useState, useCallback } from 'react';
+import React, { memo, useState, useCallback, useRef, useEffect } from 'react';
 import type { MetaTip, ExpiryCol } from '../types';
 import type { ScoredLadder, StrategyLeg, FeeRole } from '../utils/optionsMath';
 import { RECOMMEND_MIN_SCORE } from '../config/constants';
@@ -13,11 +13,14 @@ export interface LadderResult { best: ScoredLadder; poolSize: number }
  *  the order, so the copyable name is how a user locates the strike on Derive. */
 function CopyInstrument({ name }: { name: string }) {
     const [copied, setCopied] = useState(false);
+    const timer = useRef<ReturnType<typeof setTimeout>>();
+    useEffect(() => () => clearTimeout(timer.current), []);
     const copy = useCallback(() => {
         try {
             navigator.clipboard?.writeText(name);
             setCopied(true);
-            setTimeout(() => setCopied(false), 1200);
+            clearTimeout(timer.current);
+            timer.current = setTimeout(() => setCopied(false), 1200);
         } catch { /* clipboard blocked — no-op */ }
     }, [name]);
     return (
@@ -52,7 +55,7 @@ function StrategyCard({ result, isCall, asset, spot, priceSource, feeRole, contr
     }
 
     const l = result.best;
-    const { legs, score, totalPrem, totalFees, maxLossUsd, avgApr, topFactor, probAllOTM, crossExpiry, evIsIndependent, ev, evAnnual, thetaEff, volEdge, kelly, riskReturn } = l;
+    const { legs, score, totalPrem, totalFees, avgApr, topFactor, probAllOTM, crossExpiry, evIsIndependent, ev, evAnnual, thetaEff, volEdge, kelly, riskReturn } = l;
     const probAnyEx = 1 - probAllOTM;
     const recommended = result.poolSize > 1 && score >= RECOMMEND_MIN_SCORE;
     const uniqueExpiries = Array.from(new Set(legs.map((x: StrategyLeg) => x.expiry))).join(' / ');
@@ -63,12 +66,18 @@ function StrategyCard({ result, isCall, asset, spot, priceSource, feeRole, contr
         return sum + (cap > 0 ? (net / cap) * (365 / Math.max(leg.tYears * 365, 0.5)) * 100 : 0);
     }, 0) / legs.length;
 
-    // Position sizing: scale the ladder's per-contract figures by the contract count.
+    // Position sizing: scale the ladder's per-contract figures by the contract
+    // count. Capital and Max loss share ONE collateral basis (spot for the
+    // covered-call coin, strike for the CSP) so the two figures reconcile.
     const collateralPerSet = legs.reduce((s, leg) => s + (isCall ? (spot || leg.futuresPrice) : leg.strike), 0);
+    const maxLossPerSet = legs.reduce((s, leg) => {
+        const collat = isCall ? (spot || leg.futuresPrice) : leg.strike;
+        return s + Math.max(0, collat - Math.max(0, leg.premiumUsd - leg.feeUsd));
+    }, 0);
     const netPremPerSet = totalPrem - totalFees;
     const posCapital = collateralPerSet * contracts;
     const posNetPrem = netPremPerSet * contracts;
-    const posMaxLoss = maxLossUsd * contracts;
+    const posMaxLoss = maxLossPerSet * contracts;
     const feeNote = feeRole === 'maker'
         ? 'Estimated Derive MAKER fees (0.03% of spot notional per contract, no base fee, capped at 12.5% of the option value). Already subtracted from APR, EV and premium/day. Switch to Taker in the top bar if you cross the spread.'
         : 'Estimated Derive TAKER fees ($0.50 base + 0.04% of spot notional per contract, capped at 12.5% of the option value). Already subtracted from APR, EV and premium/day. Switch to Maker if you post resting quotes.';

@@ -124,7 +124,12 @@ body {
 :focus-visible {
   outline: 2px solid var(--blue);
   outline-offset: 1px;
-  border-radius: 2px;
+}
+
+/* Matrix cells sit inside overflow-clipped scroll containers; an inset ring
+   stays visible on the top/left/right edge cells that an offset ring would clip. */
+td:focus-visible {
+  outline-offset: -2px;
 }
 
 /* Native controls adopt the theme accent in both light and dark. */

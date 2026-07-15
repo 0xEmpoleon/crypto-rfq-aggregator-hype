@@ -1,5 +1,5 @@
 "use client";
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import type { HoverTip, MetaTip, Status } from '../types';
 import { deriveTakerFee } from '../utils/optionsMath';
 import { deriveTradeUrl } from '../utils/instruments';
@@ -78,8 +78,15 @@ export function Tooltip({ tip, onClose, priceSource, assetSymbol, asset, onHover
     const feeUsd = d.feeUsd ?? deriveTakerFee(d.futuresPrice, d.premiumUsd);
     const netPrem = Math.max(0, d.premiumUsd - feeUsd);
     const [copied, setCopied] = useState(false);
+    const copyTimer = useRef<ReturnType<typeof setTimeout>>();
+    useEffect(() => () => clearTimeout(copyTimer.current), []);
     const copyName = () => {
-        try { navigator.clipboard?.writeText(d.instrument); setCopied(true); setTimeout(() => setCopied(false), 1200); } catch { /* blocked */ }
+        try {
+            navigator.clipboard?.writeText(d.instrument);
+            setCopied(true);
+            clearTimeout(copyTimer.current);
+            copyTimer.current = setTimeout(() => setCopied(false), 1200);
+        } catch { /* blocked */ }
     };
 
     return (
