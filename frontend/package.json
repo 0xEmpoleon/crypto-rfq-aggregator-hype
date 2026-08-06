@@ -28,7 +28,7 @@
     "@vitest/coverage-v8": "^2.1.9",
     "eslint": "^8",
     "eslint-config-next": "14.2.35",
-    "typescript": "^5",
+    "typescript": "^7",
     "vitest": "^2.1.9"
   }
 }
