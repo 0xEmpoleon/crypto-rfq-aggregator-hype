@@ -10,7 +10,7 @@ const inter = Inter({
 });
 
 const description =
-    "Covered-call & cash-secured-put yield strategist for Derive (Lyra v2) options — " +
+    "Covered-call & cash-secured-put yield strategist for Derive options — " +
     "live strike×expiry APR matrix net of fees, Black-Scholes risk metrics, and Deribit cross-venue reference.";
 
 export const metadata: Metadata = {

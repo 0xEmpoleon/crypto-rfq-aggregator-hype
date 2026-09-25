@@ -27,7 +27,7 @@ frontend/
 │   ├── useDeriveChain.ts     # 15s poll: spot ∥ instruments → per-expiry tickers (abortable, in-flight guarded)
 │   └── useDeribitMarks.ts    # cross-venue reference prices (BTC/ETH, browser-direct)
 ├── utils/
-│   ├── optionsMath.ts        # pure quant core (greeks, prob, fees, scoring) — the only unit-tested module
+│   ├── optionsMath.ts        # pure quant core (greeks, prob, fees, scoring)
 │   ├── optionsMath.test.ts   # vitest
 │   └── instruments.ts        # instrument-name parsing, display labels, Derive deep link
 ├── config/
@@ -42,6 +42,14 @@ identity-stable (`useCallback`/`useMemo`). Hover/pin state lives only at the
 root, so moving the mouse re-renders one floating tooltip, not ~140 cells.
 
 ## Data flow — one 15-second tick
+
+The server proxies use `https://api.derive.xyz/v3`. The instruments route filters
+`public/get_all_live_instruments` to the selected currency's option names; the
+spot route maps the slim ticker's `M` field to the browser's `mark_price` field.
+Bulk option tickers retain their slim schema. The old Lyra endpoint can return
+empty option chains even when individual contracts still have prices.
+See [Derive's migration notes](https://docs.derive.xyz/migrating/breaking-changes).
+Adapter regression tests live in `frontend/app/api/derive/routes.test.ts`.
 
 1. **Fetch** — spot ∥ instrument list in parallel (`Promise.allSettled`), then
    every expiry's ticker chain concurrently. Every request carries an
