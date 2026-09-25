@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 
-const DERIVE_API = 'https://api.lyra.finance';
+const DERIVE_API = 'https://api.derive.xyz/v3';
 
 /** Chains move slowly at this app's 15s cadence — let Vercel's edge cache
  *  serve all concurrent users from ONE upstream call per URL per window. */
@@ -19,7 +19,11 @@ export function badRequest(msg: string) {
  * endpoint. Client input never reaches the upstream URL or body directly.
  * Upstream failures surface with their real status instead of a masked 200.
  */
-export async function forwardToDerive(path: string, body: Record<string, unknown>) {
+export async function forwardToDerive(
+    path: string,
+    body: Record<string, unknown>,
+    transformResult?: (result: unknown) => unknown,
+) {
     let res: Response;
     try {
         res = await fetch(`${DERIVE_API}${path}`, {
@@ -44,6 +48,16 @@ export async function forwardToDerive(path: string, body: Record<string, unknown
     // served to every user for the whole TTL. Surface it as an uncached 502.
     if (data && typeof data === 'object' && 'error' in data && (data as { error?: unknown }).error) {
         return NextResponse.json(data, { status: 502 });
+    }
+    // Keep our browser-facing contract stable while adapting v3 payloads.
+    // Malformed upstream results must not be cached as successful responses.
+    if (transformResult) {
+        try {
+            if (!data || typeof data !== 'object' || !('result' in data)) throw new Error('Missing result');
+            data = { ...data, result: transformResult(data.result) };
+        } catch {
+            return NextResponse.json({ error: 'Upstream returned an invalid result' }, { status: 502 });
+        }
     }
     return NextResponse.json(data, { headers: { 'Cache-Control': CACHE_HEADER } });
 }

@@ -1,7 +1,7 @@
 # Option Strategist — Derive Covered-Call & CSP Yields
 
 A cryptocurrency **options yield strategist** for sellers. It pulls live option chains from
-**Derive (Lyra v2)**, ranks **covered-call** and **cash-secured-put** ladders with a
+**Derive (v3 API)**, ranks **covered-call** and **cash-secured-put** ladders with a
 Black-Scholes analytics engine, and overlays **Deribit** prices as a cross-venue reference
 for BTC/ETH.
 
@@ -48,8 +48,9 @@ price decimals, Deribit-arb flag, spot fallback) lives in a single registry:
 [`frontend/config/assets.ts`](frontend/config/assets.ts). To add a coin:
 
 1. Confirm Derive lists options for it:
-   `POST https://api.lyra.finance/public/get_instruments {"currency":"<SYM>","instrument_type":"option","expired":false}`
-   should return instruments, and `<SYM>-PERP` should return a mark price.
+   `POST https://api.derive.xyz/v3/public/get_all_live_instruments {}`
+   should include `<SYM>-YYYYMMDD-STRIKE-C/P` names, and `public/get_ticker`
+   with `{"instrument_name":"<SYM>-PERP"}` should return a positive `result.M`.
 2. Add one row to `ASSET_CONFIG` (and the symbol to the `ASSETS` array).
 
 > Note: many tokens are *listed* on Derive as perps/spot but have **no live options** (DOGE,
@@ -71,7 +72,7 @@ frontend/
 │   ├── error.tsx                   # App Router error boundary
 │   └── api/derive/
 │       ├── _upstream.ts            # shared validation, edge cache, error mapping
-│       └── */route.ts              # validated, edge-cached Lyra proxies (GET)
+│       └── */route.ts              # validated, edge-cached Derive v3 adapters (GET)
 ├── components/
 │   ├── DeriveAssetYields.tsx       # orchestrator (state + derived data)
 │   ├── YieldMatrix.tsx             # strike×expiry heat-map tables
