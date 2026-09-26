@@ -37,24 +37,25 @@ the modeling choices (fee provenance, symmetric risk severity, EV masking, the P
 
 ## 🪙 Supported assets
 
-All assets with a **live option market on Derive** are supported:
+The selector discovers active option underlyings from Derive v3 on page load and every
+five minutes. As verified on **26 September 2026**, the 12 markets are:
 
 | Majors | Alts | Other |
 |--------|------|-------|
-| BTC · ETH · SOL | HYPE · XRP · ADA · ZEC | XAUT (tokenized gold) · CC |
+| BTC · ETH · SOL | HYPE · XRP · ADA · ZEC · VVV · LIT · PUMP | XAUT · CC |
 
-**Adding a coin is a one-line change.** Every per-asset knob (display symbol, strike window,
-price decimals, Deribit-arb flag, spot fallback) lives in a single registry:
-[`frontend/config/assets.ts`](frontend/config/assets.ts). To add a coin:
+The `/api/derive/markets` route derives symbols and contract/expiry counts from
+`POST https://api.derive.xyz/v3/public/get_all_live_instruments {}`. Expired contracts,
+spot tokens and perpetual-only markets do not appear. New option underlyings appear
+without redeployment; the selector shows discovery status and a retry action on failure.
+During an outage it retains the last retrieved list (or the 12-market bootstrap list).
+Successful discovery is authoritative, including when a market has been delisted.
 
-1. Confirm Derive lists options for it:
-   `POST https://api.derive.xyz/v3/public/get_all_live_instruments {}`
-   should include `<SYM>-YYYYMMDD-STRIKE-C/P` names, and `public/get_ticker`
-   with `{"instrument_name":"<SYM>-PERP"}` should return a positive `result.M`.
-2. Add one row to `ASSET_CONFIG` (and the symbol to the `ASSETS` array).
-
-> Note: many tokens are *listed* on Derive as perps/spot but have **no live options** (DOGE,
-> AVAX, LINK, BNB, SUI, PEPE, …). Those would render an empty matrix and are intentionally excluded.
+Display configuration is generated from live prices in `frontend/config/assets.ts`:
+strikes are filtered to ±40% of the live spot reference (option forward if spot is
+unavailable), and decimal precision scales to the token price. No placeholder spot
+price is used. PUMP strikes, premiums and fees retain sub-cent precision throughout
+the matrix and detail cards. Deribit overlays remain limited to BTC/ETH.
 
 ---
 
@@ -82,13 +83,14 @@ frontend/
 │   └── Tooltips.tsx                # cell/metric tooltips (mouse/keyboard/touch)
 ├── hooks/
 │   ├── useDeriveChain.ts           # 15s poll: spot ∥ instruments → tickers (abortable)
-│   └── useDeribitMarks.ts          # cross-venue reference prices
+│   ├── useDeribitMarks.ts          # cross-venue reference prices
+│   └── useOptionMarkets.ts         # live option market discovery every 5 minutes
 ├── utils/
 │   ├── optionsMath.ts              # BS greeks, prob/EV, fees, ATM IV, ladder scorer
 │   ├── optionsMath.test.ts         # vitest unit tests (CDF, parity, fees, risk, ranking)
 │   └── instruments.ts              # instrument parsing, labels, Derive deep link
 ├── config/
-│   ├── assets.ts                   # ⭐ asset registry (single source of truth)
+│   ├── assets.ts                   # bootstrap symbols + live-price display config
 │   └── constants.ts                # poll cadence, filter bands, thresholds
 ├── types.ts                        # typed upstream API shapes + view models
 └── e2e/                            # fixture-driven Playwright smoke tests
@@ -119,13 +121,10 @@ CI (GitHub Actions) runs lint · typecheck · unit tests · build · e2e on ever
 plus a Docker build. Docker (optional): `docker build -t option-strategist frontend/`
 then `docker run -p 3000:3000 option-strategist`.
 
-**Deploying:** the Vercel project is *not* git-connected, so a deploy ships the local
-working tree. Use the guarded wrapper, which refuses to deploy a tree that isn't clean,
-on `main`, in sync with origin, and CI-green:
-
-```bash
-./scripts/deploy.sh
-```
+**Deploying:** Vercel is connected to GitHub. Pull requests create preview deployments;
+merging a reviewed, CI-green PR to `main` updates production. Verify the production
+market list and option chains after deployment. `scripts/deploy.sh` is retained only
+for the legacy manual CLI deployment workflow.
 
 ---
 

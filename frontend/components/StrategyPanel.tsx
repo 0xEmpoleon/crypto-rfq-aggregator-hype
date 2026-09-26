@@ -3,7 +3,8 @@ import React, { memo, useState, useCallback, useRef, useEffect } from 'react';
 import type { MetaTip, ExpiryCol } from '../types';
 import type { ScoredLadder, StrategyLeg, FeeRole } from '../utils/optionsMath';
 import { RECOMMEND_MIN_SCORE } from '../config/constants';
-import { AssetSymbol, ASSET_CONFIG } from '../config/assets';
+import { AssetSymbol, getAssetConfig } from '../config/assets';
+import { formatPrice } from '../utils/format';
 import { deriveTradeUrl } from '../utils/instruments';
 import { MetaLabel } from './Tooltips';
 
@@ -31,7 +32,7 @@ function CopyInstrument({ name }: { name: string }) {
     );
 }
 
-const fmtUsd = (v: number, dec: number) => `$${v.toLocaleString(undefined, { maximumFractionDigits: dec })}`;
+const fmtUsd = (v: number, dec: number) => `$${formatPrice(v, Math.min(2, dec))}`;
 
 function StrategyCard({ result, isCall, asset, spot, priceSource, feeRole, contracts, loading, onHoverMeta }: {
     result: LadderResult | null;
@@ -44,7 +45,7 @@ function StrategyCard({ result, isCall, asset, spot, priceSource, feeRole, contr
     loading: boolean;
     onHoverMeta: (m: MetaTip | null) => void;
 }) {
-    const cfg = ASSET_CONFIG[asset];
+    const cfg = getAssetConfig(asset, spot ?? result?.best.legs[0]?.futuresPrice ?? 0);
     const accent = isCall ? 'var(--yellow)' : 'var(--green)';
     const dir = isCall ? 'below' : 'above';
     const pDec = cfg.priceDecimals;
@@ -111,7 +112,7 @@ function StrategyCard({ result, isCall, asset, spot, priceSource, feeRole, contr
                 {legs.map((leg: StrategyLeg, idx: number) => (
                     <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1px 0', borderTop: idx > 0 ? '1px solid var(--border-color)' : 'none', color: 'var(--text-secondary)' }}>
                         <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                            Sell {isCall ? 'CC' : 'CSP'} <span style={{ color: 'var(--text-primary)', fontWeight: 500 }}>${leg.strike.toLocaleString()}</span> <span style={{ color: 'var(--text-muted)' }}>{leg.expiry}</span>
+                            Sell {isCall ? 'CC' : 'CSP'} <span style={{ color: 'var(--text-primary)', fontWeight: 500 }}>${formatPrice(leg.strike)}</span> <span style={{ color: 'var(--text-muted)' }}>{leg.expiry}</span>
                             <CopyInstrument name={leg.instrument} />
                         </span>
                         <span>${leg.premiumUsd.toFixed(pDec)} · {(leg.premiumUsd / leg.futuresPrice).toFixed(4)}{cfg.symbol} · {leg.apr.toFixed(0)}% · P(ex) {(leg.probExercise * 100).toFixed(0)}%</span>
@@ -145,7 +146,7 @@ function StrategyCard({ result, isCall, asset, spot, priceSource, feeRole, contr
                     </>;
                 })()}
                 <br />
-                <MetaLabel title="Expected Value (EV)" text={`Expected P/L for the short position: premium collected net of estimated fees, minus the expected exercise payoff. ${evIsIndependent ? (priceSource === 'market' ? 'Benchmarked against the live bid — an independent fair value.' : 'Benchmarked against the matching Deribit mark — an independent venue, so this is a real edge signal.') : 'Under MARK pricing with no Deribit reference, this compares the venue mark to a model priced from that same mark IV, so it is ≈0 and excluded from the ranking score.'}`} label="EV (1 ct):" onHoverMeta={onHoverMeta} /> ${(ev / legs.length).toFixed(pDec)} (${evAnnual.toFixed(pDec)}/yr){evIsIndependent ? '' : ' *'} · <MetaLabel title="P(any exercise)" text={`The probability that at least one leg finishes In-The-Money at expiry.${crossExpiry ? ' This ladder spans multiple expiries, so the figure is a LOWER bound — true joint risk is higher.' : ''}`} label="P(any ex):" onHoverMeta={onHoverMeta} /> <span style={{ color: accent, fontWeight: 600 }}>{crossExpiry ? '≥' : ''}{(probAnyEx * 100).toFixed(0)}%</span> · <MetaLabel title="Fees (est.)" text={feeNote} label="Fees:" onHoverMeta={onHoverMeta} /> <span style={{ color: 'var(--red)' }}>−${totalFees.toFixed(2)}</span> · <MetaLabel title="Premium / day" text="Net premium amortized over days to expiry — a decay proxy for the seller, NOT the Black-Scholes theta greek." label="Prem/day:" onHoverMeta={onHoverMeta} /> ${thetaEff.toFixed(pDec)}/d
+                <MetaLabel title="Expected Value (EV)" text={`Expected P/L for the short position: premium collected net of estimated fees, minus the expected exercise payoff. ${evIsIndependent ? (priceSource === 'market' ? 'Benchmarked against the live bid — an independent fair value.' : 'Benchmarked against the matching Deribit mark — an independent venue, so this is a real edge signal.') : 'Under MARK pricing with no Deribit reference, this compares the venue mark to a model priced from that same mark IV, so it is ≈0 and excluded from the ranking score.'}`} label="EV (1 ct):" onHoverMeta={onHoverMeta} /> ${(ev / legs.length).toFixed(pDec)} (${evAnnual.toFixed(pDec)}/yr){evIsIndependent ? '' : ' *'} · <MetaLabel title="P(any exercise)" text={`The probability that at least one leg finishes In-The-Money at expiry.${crossExpiry ? ' This ladder spans multiple expiries, so the figure is a LOWER bound — true joint risk is higher.' : ''}`} label="P(any ex):" onHoverMeta={onHoverMeta} /> <span style={{ color: accent, fontWeight: 600 }}>{crossExpiry ? '≥' : ''}{(probAnyEx * 100).toFixed(0)}%</span> · <MetaLabel title="Fees (est.)" text={feeNote} label="Fees:" onHoverMeta={onHoverMeta} /> <span style={{ color: 'var(--red)' }}>−${formatPrice(totalFees, 2)}</span> · <MetaLabel title="Premium / day" text="Net premium amortized over days to expiry — a decay proxy for the seller, NOT the Black-Scholes theta greek." label="Prem/day:" onHoverMeta={onHoverMeta} /> ${thetaEff.toFixed(pDec)}/d
                 <br />
                 <MetaLabel title="Volatility Edge (skew)" text="This strike's IV minus the ATM IV of the SAME expiry, as a fraction of ATM. A same-snapshot skew reading — positive means this strike is bid up vs its own expiry's ATM." label="Vol edge:" onHoverMeta={onHoverMeta} /> {(volEdge * 100).toFixed(1)}% vs ATM · <MetaLabel title="Edge Score (heuristic)" text="Internal edge-vs-variance ranking heuristic. NOT the literal Kelly criterion — do not use it to size capital." label="Edge:" onHoverMeta={onHoverMeta} /> {(kelly * 100).toFixed(1)}% · <MetaLabel title="Risk/Reward Ratio" text="Net EV over expected exercise payoff (one model-consistent risk scale for puts and calls)." label="R/R:" onHoverMeta={onHoverMeta} /> {riskReturn.toFixed(2)}
                 <br />
@@ -188,7 +189,7 @@ export const StrategyPanel = memo(function StrategyPanel({
                         <button onClick={() => onPriceSource('mark')} aria-pressed={priceSource === 'mark'} style={{ padding: '1px 5px', minHeight: '20px', fontSize: 'var(--t-micro)', border: 'none', background: priceSource === 'mark' ? 'var(--blue)' : 'transparent', color: priceSource === 'mark' ? 'white' : 'var(--text-muted)', cursor: 'pointer', borderRadius: '2px', fontWeight: 600 }}>MARK</button>
                         <button onClick={() => onPriceSource('market')} aria-pressed={priceSource === 'market'} style={{ padding: '1px 5px', minHeight: '20px', fontSize: 'var(--t-micro)', border: 'none', background: priceSource === 'market' ? 'var(--blue)' : 'transparent', color: priceSource === 'market' ? 'white' : 'var(--text-muted)', cursor: 'pointer', borderRadius: '2px', fontWeight: 600 }}>Market</button>
                     </div>
-                    {spot != null && <span style={{ fontSize: 'var(--t-data)', fontWeight: 600 }}>{asset} ${spot.toLocaleString()}</span>}
+                    {spot != null && <span style={{ fontSize: 'var(--t-data)', fontWeight: 600 }}>{asset} ${formatPrice(spot)}</span>}
                     {dvol != null && <span style={{ fontSize: 'var(--t-data)', color: 'var(--text-secondary)' }}>~30d ATM IV {dvol.toFixed(1)}</span>}
                 </div>
                 <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>

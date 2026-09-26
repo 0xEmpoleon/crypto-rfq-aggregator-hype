@@ -1,4 +1,5 @@
 import type { Page } from '@playwright/test';
+import { ASSETS } from '../config/assets';
 
 /**
  * Deterministic synthetic option chain served via route interception. A single
@@ -6,7 +7,7 @@ import type { Page } from '@playwright/test';
  * handful of near-the-money BTC strikes — enough for the matrix to render and
  * a ladder to form, with zero dependence on the live venues.
  */
-export function buildChain(spot = 60000) {
+export function buildChain(spot = 60000, asset = 'BTC') {
     const d = new Date(Date.now() + 30 * 86400_000);
     const yyyymmdd = `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, '0')}${String(d.getUTCDate()).padStart(2, '0')}`;
 
@@ -21,17 +22,19 @@ export function buildChain(spot = 60000) {
 
     const instruments: { instrument_name: string }[] = [];
     const tickers: Record<string, unknown> = {};
-    for (const { strike, iv } of rows) {
+    for (const row of rows) {
+        const strike = Number((row.strike * spot / 60000).toPrecision(8));
+        const iv = row.iv;
         for (const type of ['C', 'P'] as const) {
-            const name = `BTC-${yyyymmdd}-${strike}-${type}`;
+            const name = `${asset}-${yyyymmdd}-${String(strike).replace('.', '_')}-${type}`;
             instruments.push({ instrument_name: name });
             // crude intrinsic + time value so premiums are positive and varied
             const intrinsic = type === 'C' ? Math.max(0, spot - strike) : Math.max(0, strike - spot);
-            const mark = Math.round(intrinsic + spot * iv * 0.08);
+            const mark = intrinsic + spot * iv * 0.08;
             tickers[name] = {
                 M: mark,
-                b: Math.round(mark * 0.98),
-                a: Math.round(mark * 1.02),
+                b: mark * 0.98,
+                a: mark * 1.02,
                 option_pricing: { f: spot, i: iv },
             };
         }
@@ -41,8 +44,12 @@ export function buildChain(spot = 60000) {
 }
 
 /** Route all Derive/Deribit calls to the synthetic chain. */
-export async function mockChain(page: Page, spot = 60000) {
-    const chain = buildChain(spot);
+export async function mockChain(page: Page, spot = 60000, asset = 'BTC') {
+    const chain = buildChain(spot, asset);
+
+    await page.route('**/api/derive/markets', route => route.fulfill({ json: {
+        result: [...new Set([...ASSETS, asset])].map(symbol => ({ symbol, optionCount: 10, expiryCount: 1 })),
+    } }));
 
     await page.route('**/api/derive/ticker*', route =>
         route.fulfill({ json: { result: { mark_price: chain.spot } } })
