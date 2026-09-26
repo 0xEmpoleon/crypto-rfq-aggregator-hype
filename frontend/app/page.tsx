@@ -2,7 +2,8 @@
 
 import React, { useEffect, useState } from 'react';
 import DeriveAssetYields from '../components/DeriveAssetYields';
-import { ASSETS, AssetSymbol } from '../config/assets';
+import { AssetSymbol } from '../config/assets';
+import { useOptionMarkets } from '../hooks/useOptionMarkets';
 
 const VIEW_LS_KEY = 'optionStrategist.view.v1';
 
@@ -14,6 +15,8 @@ export default function Dashboard() {
     const [darkMode, setDarkMode] = useState(true);
     const [asset, setAsset] = useState<AssetSymbol>('HYPE');
     const [hydrated, setHydrated] = useState(false);
+    const { markets, status: marketStatus, checkedAt, retry } = useOptionMarkets();
+    const selectedIsLive = markets.some(m => m.symbol === asset);
 
     useEffect(() => {
         // Adopt whatever the blocking script already applied (localStorage / OS),
@@ -23,7 +26,7 @@ export default function Dashboard() {
             const raw = localStorage.getItem(VIEW_LS_KEY);
             if (raw) {
                 const v = JSON.parse(raw);
-                if (ASSETS.includes(v.asset)) setAsset(v.asset);
+                if (typeof v.asset === 'string' && /^[A-Z0-9]{1,10}$/.test(v.asset)) setAsset(v.asset);
             }
         } catch { /* storage unavailable */ }
         setHydrated(true);
@@ -44,7 +47,7 @@ export default function Dashboard() {
         <main className="container">
             <header className="header" style={{ display: 'flex', flexDirection: 'column', gap: '8px', paddingBottom: '12px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', flexWrap: 'wrap', gap: '8px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
                         <h1>Option Strategist</h1>
                         <span style={{ color: 'var(--text-muted)', fontSize: 'var(--t-label)', fontWeight: 400 }}>
                             Covered-call & CSP yields on Derive
@@ -52,9 +55,10 @@ export default function Dashboard() {
                     </div>
                     <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
                         <div style={{ display: 'flex', background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: '4px', overflow: 'hidden', flexWrap: 'wrap' }} role="group" aria-label="Underlying asset">
-                            {ASSETS.map((a, i) => (
+                            {markets.map(({ symbol: a, optionCount, expiryCount }, i) => (
                                 <button
                                     key={a}
+                                    title={optionCount ? `${optionCount} listed options · ${expiryCount} expiries` : 'Last known options market; checking availability'}
                                     onClick={() => setAsset(a)}
                                     aria-pressed={asset === a}
                                     style={{
@@ -89,8 +93,16 @@ export default function Dashboard() {
                         </button>
                     </div>
                 </div>
+                <div role="status" style={{ width: '100%', fontSize: 'var(--t-meta)', color: marketStatus === 'stale' ? 'var(--orange)' : 'var(--text-muted)' }}>
+                    {marketStatus === 'loading' ? 'Checking live option markets…' : marketStatus === 'live'
+                        ? `${markets.length} live option markets · auto-refresh every 5 min · checked ${checkedAt?.toLocaleTimeString('en-GB')}`
+                        : `Market discovery unavailable — showing ${checkedAt ? 'last retrieved' : 'last known'} listings.`}
+                    {marketStatus === 'stale' && <button onClick={retry} style={{ marginLeft: '8px', background: 'transparent', border: '1px solid currentColor', borderRadius: '3px', color: 'inherit', padding: '1px 6px', cursor: 'pointer' }}>Retry markets</button>}
+                </div>
             </header>
-            <DeriveAssetYields asset={asset} darkMode={darkMode} />
+            {marketStatus === 'live' && !selectedIsLive
+                ? <p role="status" style={{ padding: '24px' }}>No active options are currently listed for {asset}. Select another market above.</p>
+                : <DeriveAssetYields key={asset} asset={asset} darkMode={darkMode} />}
         </main>
     );
 }

@@ -2,7 +2,7 @@
 import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import * as MathUtils from '../utils/optionsMath';
 import type { StrategyLeg, LadderContext, FeeRole } from '../utils/optionsMath';
-import { AssetSymbol, ASSET_CONFIG } from '../config/assets';
+import { AssetSymbol, getAssetConfig } from '../config/assets';
 import { MIN_DTE_DAYS, APR_MIN_PCT, APR_MAX_PCT, RECOMMEND_MIN_SCORE, TRADE_POOL_MIN } from '../config/constants';
 import { useDeriveChain } from '../hooks/useDeriveChain';
 import { useDeribitMarks } from '../hooks/useDeribitMarks';
@@ -21,8 +21,6 @@ import type { CellData, ExpiryCol, HoverTip, MetaTip } from '../types';
 const CONTROLS_LS_KEY = 'optionStrategist.controls.v1';
 
 export default function DeriveAssetYields({ asset, darkMode }: { asset: AssetSymbol; darkMode: boolean }) {
-    const cfg = ASSET_CONFIG[asset];
-
     const [hoverTip, setHoverTip] = useState<HoverTip | null>(null);
     const [hoverMeta, setHoverMeta] = useState<MetaTip | null>(null);
     const [pinnedLocs, setPinnedLocs] = useState<Record<string, { x: number; y: number }>>({});
@@ -36,6 +34,8 @@ export default function DeriveAssetYields({ asset, darkMode }: { asset: AssetSym
     const [controlsLoaded, setControlsLoaded] = useState(false);
 
     const { spot, dvol, atmIvByExpiry, opts, loading, dataAt, st, countdown, refresh } = useDeriveChain(asset);
+    const reference = spot ?? opts[0]?.futuresPrice ?? 0;
+    const cfg = useMemo(() => getAssetConfig(asset, reference), [asset, reference]);
     const deribitPrices = useDeribitMarks(asset, cfg.deribitArb);
 
     // Controls survive asset switches and reloads; per-asset view state resets.
@@ -70,7 +70,7 @@ export default function DeriveAssetYields({ asset, darkMode }: { asset: AssetSym
     const trades = useMemo<StrategyLeg[]>(() => {
         if (!opts.length) return [];
         const t: StrategyLeg[] = [];
-        const ref = spot ?? cfg.fallbackSpot;
+        const ref = spot ?? opts[0]?.futuresPrice ?? 0;
         for (const o of opts) {
             if (o.dte <= MIN_DTE_DAYS || excludedExp.has(o.expiry)) continue;
             if (Math.abs(o.strike - ref) > cfg.strikeRange) continue;
@@ -136,7 +136,7 @@ export default function DeriveAssetYields({ asset, darkMode }: { asset: AssetSym
         const expsArr: ExpiryCol[] = [];
         em.forEach((v, k) => { expsArr.push({ label: k, ...v }); });
         const exps = expsArr.sort((a, b) => a.ts - b.ts);
-        const ref = spot ?? exps[0]?.fp ?? cfg.fallbackSpot;
+        const ref = spot ?? opts[0]?.futuresPrice ?? 0;
         const fFiltered = f.filter(o => Math.abs(o.strike - ref) <= cfg.strikeRange && (o.type === 'C' ? o.strike >= ref : o.strike <= ref));
 
         const pS = new Set<number>();
@@ -231,7 +231,7 @@ export default function DeriveAssetYields({ asset, darkMode }: { asset: AssetSym
             />
 
             <div style={{ flex: '0 0 auto', padding: '2px 0', fontSize: 'var(--t-micro)', color: 'var(--text-muted)', textAlign: 'center' }}>
-                Market data: Derive & Deribit public APIs · yields are estimates net of est. taker fees · nothing here is financial advice — for education only.
+                Market data: Derive & Deribit public APIs · {priceSource === 'mark' ? 'indicative mark prices' : 'best bid prices; available size not checked'} · yields net of estimated {feeRole} fees · for education only.
             </div>
 
             {/* Pinned detail cards render here at fixed viewport coordinates so the

@@ -2,6 +2,7 @@
 import React, { memo } from 'react';
 import type { CellData, DeribitMaps, ExpiryCol, HoverTip } from '../types';
 import { MatrixCell } from './MatrixCell';
+import { formatPrice } from '../utils/format';
 
 export interface YieldMatrixProps {
     exps: ExpiryCol[];
@@ -54,8 +55,8 @@ export const YieldMatrix = memo(function YieldMatrix({
                 <button onClick={onRetry} style={{ padding: '4px 14px', borderRadius: '4px', border: '1px solid var(--border-strong)', background: 'var(--bg-card)', color: 'var(--text-primary)', cursor: 'pointer', fontWeight: 600 }}>Retry</button>
             </div>
         );
-    } else if (!exps.length) {
-        body = <div style={centered}>No liquid strikes within ±${strikeRange.toLocaleString()} of spot{priceSource === 'market' ? ' with a resting bid' : ''}.</div>;
+    } else if (!exps.length || (!putK.length && !callK.length)) {
+        body = <div style={centered}>No eligible strikes within ±${formatPrice(strikeRange)} of the reference price{priceSource === 'market' ? ' with a resting bid. Switch to MARK to view indicative prices' : ''}.</div>;
     } else {
         body = (
             <div className="two-col" style={{ flex: '1 1 auto', overflow: 'hidden' }}>
@@ -76,7 +77,7 @@ export const YieldMatrix = memo(function YieldMatrix({
                                 <tbody>
                                     {(t === 'C' ? callK : putK).map(s => (
                                         <tr key={s}>
-                                            <th scope="row" style={{ fontSize: '12px', fontWeight: 700, padding: '4px', borderBottom: '1px solid var(--border-color)', color: 'var(--text-primary)', textAlign: 'center' }}>${s.toLocaleString()}</th>
+                                            <th scope="row" style={{ fontSize: '12px', fontWeight: 700, padding: '4px', borderBottom: '1px solid var(--border-color)', color: 'var(--text-primary)', textAlign: 'center' }}>${formatPrice(s)}</th>
                                             {exps.map(e => {
                                                 const k = `${t}-${s}-${e.label}`;
                                                 return (
@@ -121,7 +122,7 @@ export const YieldMatrix = memo(function YieldMatrix({
                     Cell: <span style={{ color: 'var(--text-secondary)' }}>net APR%</span> · <span style={{ color: 'var(--text-secondary)' }}>P(ex)%</span> · <span style={{ color: 'var(--text-secondary)' }}>premium ({assetSymbol})</span>
                     {Object.keys(dbitMap).length > 0 && <> · vs Deribit: <span style={{ color: 'var(--green)' }}>richer</span>/<span style={{ color: 'var(--red)' }}>cheaper</span></>}
                 </div>
-                <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)' }}>Spot: <span style={{ color: 'var(--blue)' }}>{spot != null ? `$${spot.toLocaleString()}` : '—'}</span></div>
+                <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)' }}>Spot: <span style={{ color: 'var(--blue)' }}>{spot != null ? `$${formatPrice(spot)}` : '—'}</span> · Strikes ±40%</div>
             </div>
 
             {body}

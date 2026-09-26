@@ -1,4 +1,5 @@
 "use client";
+import { formatPrice } from '../utils/format';
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import type { HoverTip, MetaTip, Status } from '../types';
 import { deriveTakerFee } from '../utils/optionsMath';
@@ -100,13 +101,13 @@ export function Tooltip({ tip, onClose, priceSource, assetSymbol, asset, onHover
             </div>
 
             <div style={{ fontSize: '11px', display: 'grid', gridTemplateColumns: '1fr auto', gap: '4px 0', color: 'var(--text-secondary)' }}>
-                <span>Strike</span><span style={{ color: 'var(--text-primary)', fontWeight: 700, textAlign: 'right' }}>${d.strike.toLocaleString()}</span>
+                <span>Strike</span><span style={{ color: 'var(--text-primary)', fontWeight: 700, textAlign: 'right' }}>${formatPrice(d.strike)}</span>
                 <span>Expiry</span><span style={{ color: 'var(--text-primary)', fontWeight: 700, textAlign: 'right' }}>{d.exp} ({d.dte.toFixed(0)}d)</span>
                 <span>IV</span><span style={{ color: 'var(--text-primary)', fontWeight: 700, textAlign: 'right' }}>{d.markIv?.toFixed(1)}%</span>
-                <span>Prem $ ({priceSource})</span><span style={{ color: 'var(--text-primary)', fontWeight: 700, textAlign: 'right' }}>${d.premiumUsd?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                <span>Prem $ ({priceSource})</span><span style={{ color: 'var(--text-primary)', fontWeight: 700, textAlign: 'right' }}>${formatPrice(d.premiumUsd, 2)}</span>
                 <MetaLabel title="Estimated fee" text="Derive fee estimate at the selected role; makers pay less than takers. Capped at 12.5% of the option's value." label="Est. fee" onHoverMeta={onHoverMeta} />
-                <span style={{ color: 'var(--red)', fontWeight: 600, textAlign: 'right' }}>−${feeUsd.toFixed(2)}</span>
-                <span>Net prem</span><span style={{ color: 'var(--text-primary)', fontWeight: 700, textAlign: 'right' }}>${netPrem.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                <span style={{ color: 'var(--red)', fontWeight: 600, textAlign: 'right' }}>−${formatPrice(feeUsd, 2)}</span>
+                <span>Net prem</span><span style={{ color: 'var(--text-primary)', fontWeight: 700, textAlign: 'right' }}>${formatPrice(netPrem, 2)}</span>
                 <span>Prem {assetSymbol}</span><span style={{ color: 'var(--text-primary)', fontWeight: 700, textAlign: 'right' }}>{(d.premiumUsd / d.futuresPrice)?.toFixed(4)} {assetSymbol}</span>
             </div>
 
@@ -123,10 +124,10 @@ export function Tooltip({ tip, onClose, priceSource, assetSymbol, asset, onHover
                     <span style={{ color: 'var(--text-primary)', fontWeight: 600, textAlign: 'right' }}>{d.greeks?.gamma?.toFixed(5)}</span>
 
                     <MetaLabel title="Theta (Θ) — seller" text="Daily time decay shown from the seller's side: positive = premium you collect per day as the option decays toward expiry." label="Theta (Θ)" onHoverMeta={onHoverMeta} />
-                    <span style={{ color: 'var(--text-primary)', fontWeight: 600, textAlign: 'right' }}>{(-(d.greeks?.theta ?? 0)).toFixed(2)}</span>
+                    <span style={{ color: 'var(--text-primary)', fontWeight: 600, textAlign: 'right' }}>{formatPrice(-(d.greeks?.theta ?? 0), 2)}</span>
 
                     <MetaLabel title="Vega (ν)" text="Measures the sensitivity of the option price to a 1% change in the implied volatility (IV) of the underlying asset." label="Vega (ν)" onHoverMeta={onHoverMeta} />
-                    <span style={{ color: 'var(--text-primary)', fontWeight: 600, textAlign: 'right' }}>{d.greeks?.vega?.toFixed(2)}</span>
+                    <span style={{ color: 'var(--text-primary)', fontWeight: 600, textAlign: 'right' }}>{formatPrice(d.greeks?.vega ?? 0, 2)}</span>
                 </div>
             </div>
 

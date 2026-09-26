@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GET as instruments } from './instruments/route';
 import { GET as ticker } from './ticker/route';
 import { GET as tickers } from './tickers/route';
+import { GET as markets } from './markets/route';
 
 const upstream = vi.fn();
 const request = (path: string) => new Request(`https://example.test/api/derive/${path}`);
@@ -11,7 +12,7 @@ beforeEach(() => { upstream.mockReset(); vi.stubGlobal('fetch', upstream); });
 afterEach(() => vi.unstubAllGlobals());
 
 describe('Derive v3 market-data adapters', () => {
-    it.each(['BTC', 'ETH', 'SOL', 'HYPE', 'XRP', 'ADA', 'ZEC', 'XAUT', 'CC'])(
+    it.each(['BTC', 'ETH', 'SOL', 'HYPE', 'XRP', 'ADA', 'ZEC', 'XAUT', 'CC', 'VVV', 'LIT', 'PUMP'])(
         'discovers only %s options from the full live instrument list', async currency => {
             const names = [`${currency}-20261225-0_5-C`, `${currency}-20261225-100-P`];
             reply([...names, `${currency}-PERP`, `${currency}X-20261225-100-C`, 'USDC', `${currency}-malformed`]);
@@ -24,6 +25,17 @@ describe('Derive v3 market-data adapters', () => {
             expect(response.headers.get('Cache-Control')).toContain('s-maxage=15');
         },
     );
+
+    it('exposes discovery with the same failure and cache semantics as the chain routes', async () => {
+        reply(['PUMP-20991225-0_0045-C', 'VVV-PERP']);
+        const response = await markets();
+        expect((await response.json()).result).toEqual([{ symbol: 'PUMP', optionCount: 1, expiryCount: 1 }]);
+        expect(response.headers.get('Cache-Control')).toContain('s-maxage=15');
+        reply({ invalid: true });
+        const failure = await markets();
+        expect(failure.status).toBe(502);
+        expect(failure.headers.get('Cache-Control')).toBeNull();
+    });
 
     it('adapts a slim ZEC perpetual mark to the existing browser contract', async () => {
         reply({ M: '1570.21', I: '1570.3', b: '0', a: '0', option_pricing: null });

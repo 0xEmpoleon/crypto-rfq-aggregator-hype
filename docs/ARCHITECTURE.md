@@ -31,7 +31,7 @@ frontend/
 │   ├── optionsMath.test.ts   # vitest
 │   └── instruments.ts        # instrument-name parsing, display labels, Derive deep link
 ├── config/
-│   ├── assets.ts             # ⭐ asset registry — add a coin = one row
+│   ├── assets.ts             # bootstrap symbols + live-price display config
 │   └── constants.ts          # poll cadence, filter bands, score gate
 ├── types.ts                  # typed upstream API shapes + view models
 └── e2e/                      # fixture-driven Playwright smoke tests
@@ -57,7 +57,7 @@ Adapter regression tests live in `frontend/app/api/derive/routes.test.ts`.
 2. **Ingest + guard** — reject rows without a mark, a forward, or an IV (a
    zero-IV row would otherwise surface as a P(ex)=0 "risk-free" trade). Compute
    exact time-to-expiry; greeks / P(ex)=N(±d2) / expected ITM payoff on the forward.
-3. **Filter** — DTE > 7d · within the per-asset strike window · OTM side only ·
+3. **Filter** — DTE > 7d · within ±40% of the live reference price · OTM side only ·
    Market mode requires a live bid · fee-net APR ∈ (5%, 300%] · P(ex) ≤ cap.
 4. **Ladder search** — per-expiry and top-APR combination pools, 1–5 legs,
    deduped once across passes; each candidate scored.
@@ -109,8 +109,25 @@ from the browser (CORS-open), keeping its rate limit on each user's IP.
 
 ## Deploy
 
-The Vercel project is **not** git-connected. `scripts/deploy.sh` gates a manual
+The Vercel project is GitHub-connected: PRs produce previews and merges to `main` deploy production. The legacy `scripts/deploy.sh` gates a manual
 `vercel --prod` on a clean tree that is on `main`, in sync with origin, and
 CI-green, so what ships is always a reviewed commit. GitHub Actions runs
 lint · typecheck · unit tests (coverage) · build · fixture-driven e2e on every
 PR, plus a Docker build.
+
+
+## Live options market discovery
+
+`GET /api/derive/markets` adapts the v3 live instrument list into deduplicated option
+underlyings, contract counts and expiry counts. It validates names and dates, excludes
+expired contracts and ignores spot/perp-only assets. The browser refreshes every five
+minutes with a bounded request timeout, keeps the previous list on failure, and exposes
+status plus retry. A successful empty list is treated as authoritative. Stored selections
+are restored for dynamically discovered symbols; a removed selection shows a clear
+no-active-options state. Unknown assets use generic display configuration from live
+prices. The last-verified bootstrap list is only an outage fallback.
+
+The matrix uses a ±40% strike band, with the live perp reference or the option forward
+when unavailable; synthetic fallback prices have been removed. Small-token strikes,
+premiums and fees use adaptive decimal formatting. Market-mode labels explicitly note
+that best bids do not establish executable size.
