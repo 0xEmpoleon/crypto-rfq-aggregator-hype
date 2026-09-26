@@ -189,7 +189,7 @@ export const StrategyPanel = memo(function StrategyPanel({
                         <button onClick={() => onPriceSource('mark')} aria-pressed={priceSource === 'mark'} style={{ padding: '1px 5px', minHeight: '20px', fontSize: 'var(--t-micro)', border: 'none', background: priceSource === 'mark' ? 'var(--blue)' : 'transparent', color: priceSource === 'mark' ? 'white' : 'var(--text-muted)', cursor: 'pointer', borderRadius: '2px', fontWeight: 600 }}>MARK</button>
                         <button onClick={() => onPriceSource('market')} aria-pressed={priceSource === 'market'} style={{ padding: '1px 5px', minHeight: '20px', fontSize: 'var(--t-micro)', border: 'none', background: priceSource === 'market' ? 'var(--blue)' : 'transparent', color: priceSource === 'market' ? 'white' : 'var(--text-muted)', cursor: 'pointer', borderRadius: '2px', fontWeight: 600 }}>Market</button>
                     </div>
-                    {spot != null && <span style={{ fontSize: 'var(--t-data)', fontWeight: 600 }}>{asset} ${spot.toLocaleString()}</span>}
+                    {spot != null && <span style={{ fontSize: 'var(--t-data)', fontWeight: 600 }}>{asset} ${formatPrice(spot)}</span>}
                     {dvol != null && <span style={{ fontSize: 'var(--t-data)', color: 'var(--text-secondary)' }}>~30d ATM IV {dvol.toFixed(1)}</span>}
                 </div>
                 <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>

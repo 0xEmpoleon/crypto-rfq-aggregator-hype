@@ -100,7 +100,7 @@ export default function Dashboard() {
                     {marketStatus === 'stale' && <button onClick={retry} style={{ marginLeft: '8px', background: 'transparent', border: '1px solid currentColor', borderRadius: '3px', color: 'inherit', padding: '1px 6px', cursor: 'pointer' }}>Retry markets</button>}
                 </div>
             </header>
-            {marketStatus === 'live' && !selectedIsLive
+            {checkedAt && !selectedIsLive
                 ? <p role="status" style={{ padding: '24px' }}>No active options are currently listed for {asset}. Select another market above.</p>
                 : <DeriveAssetYields key={asset} asset={asset} darkMode={darkMode} />}
         </main>

@@ -10,6 +10,7 @@ for (const [asset, spot] of [['VVV', 30], ['LIT', 4.8], ['PUMP', 0.0045], ['NEWC
         await page.getByRole('button', { name: asset, exact: true }).click();
         await expect(page.locator('td', { hasText: '%' }).first()).toBeVisible();
         if (spot < 0.01) {
+            await expect(page.getByText(`${asset} $0.0045`, { exact: true })).toBeVisible();
             await expect(page.getByRole('rowheader', { name: '$0.0045', exact: true }).first()).toBeVisible();
             await expect(page.getByRole('rowheader', { name: '$0.0048', exact: true }).first()).toBeVisible();
             await page.getByRole('button', { name: /^Call 0.0045 / }).click();
