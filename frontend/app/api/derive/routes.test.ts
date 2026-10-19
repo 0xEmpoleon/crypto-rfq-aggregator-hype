@@ -40,7 +40,7 @@ describe('Derive v3 market-data adapters', () => {
     it('adapts a slim ZEC perpetual mark to the existing browser contract', async () => {
         reply({ M: '1570.21', I: '1570.3', b: '0', a: '0', option_pricing: null });
         const response = await ticker(request('ticker?instrument_name=ZEC-PERP'));
-        expect(await response.json()).toEqual({ id: 'test', result: { mark_price: '1570.21' } });
+        expect(await response.json()).toEqual({ id: 'test', result: { mark_price: '1570.21', index_price: '1570.3' } });
         expect(upstream).toHaveBeenCalledWith('https://api.derive.xyz/v3/public/get_ticker', expect.objectContaining({
             body: JSON.stringify({ instrument_name: 'ZEC-PERP' }),
         }));
@@ -63,6 +63,12 @@ describe('Derive v3 market-data adapters', () => {
         const response = await instruments(request('instruments?currency=ZEC'));
         expect(response.status).toBe(502);
         expect(response.headers.get('Cache-Control')).toBeNull();
+    });
+
+    it('omits an invalid index rather than passing it to the client', async () => {
+        reply({ M: '1570.21', I: '0' });
+        const response = await ticker(request('ticker?instrument_name=ZEC-PERP'));
+        expect(await response.json()).toEqual({ id: 'test', result: { mark_price: '1570.21' } });
     });
 
     it.each([{}, { M: 'NaN' }, { M: 'Infinity' }, { M: '0' }, { M: null }, { M: true }])(

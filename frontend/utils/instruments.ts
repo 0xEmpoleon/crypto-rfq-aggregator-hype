@@ -41,9 +41,11 @@ export function expiryLabel(e: string): string {
     return `${day}${mon}${yy}`;
 }
 
-/** Heat-map background for a matrix cell, scaled 0–120% APR. */
-export function heatColor(apr: number, type: 'P' | 'C', dark: boolean): string {
+/** Heat-map background for a matrix cell, scaled 0–120% APR.
+ *  NERV palette: calls heat in interface orange, puts in Eva-01 green. Green
+ *  is far more luminous than orange, so its ceiling alpha is lower to keep
+ *  the white cell text legible at the top of the scale. */
+export function heatColor(apr: number, type: 'P' | 'C'): string {
     const i = Math.min(Math.max(apr, 0), 120) / 120;
-    if (dark) return type === 'P' ? `rgba(34,197,94,${0.03 + i * 0.22})` : `rgba(234,179,8,${0.03 + i * 0.18})`;
-    return type === 'P' ? `rgba(34,197,94,${0.05 + i * 0.25})` : `rgba(234,179,8,${0.05 + i * 0.2})`;
+    return type === 'P' ? `rgba(140,255,60,${0.02 + i * 0.16})` : `rgba(255,110,30,${0.03 + i * 0.27})`;
 }

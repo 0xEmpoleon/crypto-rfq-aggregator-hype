@@ -75,7 +75,7 @@ export interface DeriveInstrumentsResponse {
 }
 
 export interface DerivePerpTickerResponse {
-    result?: { mark_price?: number | string };
+    result?: { mark_price?: number | string; index_price?: number | string };
 }
 
 export interface DeribitBookSummary {

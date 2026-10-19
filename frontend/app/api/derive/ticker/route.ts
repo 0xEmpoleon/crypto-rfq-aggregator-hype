@@ -10,6 +10,12 @@ export async function GET(req: Request) {
             || !Number.isFinite(+result.M) || +result.M <= 0) {
             throw new Error('Invalid mark price');
         }
-        return { mark_price: result.M };
+        // The index (I) is the spot that fees and covered-call collateral are
+        // valued at; pass it through when valid, the client falls back to M.
+        const raw = (result as { I?: unknown }).I;
+        const index = typeof raw === 'string' || typeof raw === 'number' ? Number(raw) : NaN;
+        return Number.isFinite(index) && index > 0
+            ? { mark_price: result.M, index_price: raw }
+            : { mark_price: result.M };
     });
 }

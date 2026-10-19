@@ -45,9 +45,12 @@ describe('small-token display and live-price configuration', () => {
         const cfg = getAssetConfig('NEWCOIN', 0.0044);
         expect(cfg.symbol).toBe('NEWCOIN');
         expect(cfg.strikeRange).toBeCloseTo(0.00176, 8);
-        expect(cfg.deribitArb).toBe(false);
+        expect(cfg.deribit).toBeNull();
         expect(getAssetConfig('NEWCOIN').strikeRange).toBe(0);
         expect(getAssetConfig('BTC', 100000).strikeRange).toBe(40000);
-        expect(getAssetConfig('BTC', 100000).deribitArb).toBe(true);
+        expect(getAssetConfig('BTC', 100000).deribit).toBe('inverse');
+        // Deribit's USDC-linear book gives SOL/HYPE/XRP an independent fair value too.
+        expect(getAssetConfig('SOL', 100).deribit).toBe('linear');
+        expect(getAssetConfig('PUMP', 0.0045).deribit).toBeNull();
     });
 });

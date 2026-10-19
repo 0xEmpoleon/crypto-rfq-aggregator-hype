@@ -11,6 +11,3 @@ export const APR_MAX_PCT = 300;
 /** A ladder is highlighted in the matrix only above this score, and only
  *  when it was ranked against at least one alternative. */
 export const RECOMMEND_MIN_SCORE = 5.0;
-
-/** How many top-APR trades feed the ladder search. */
-export const TRADE_POOL_MIN = 15;

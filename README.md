@@ -16,22 +16,28 @@ for BTC/ETH.
   annualized yield (**APR, net of estimated fees**) with probability-of-exercise, priced
   from Derive marks or live bids.
 - **Strategy recommendations** — an automated finder builds 1–5 leg CC/CSP ladders and ranks
-  them in one shared scoring pass on expected value, risk/return, same-expiry skew (vol
-  edge), premium decay and diversification ([`utils/optionsMath.ts`](frontend/utils/optionsMath.ts)).
+  them in one shared scoring pass ([`utils/optionsMath.ts`](frontend/utils/optionsMath.ts)).
+  Where Deribit lists the same strikes it ranks on **expected value and edge vs Deribit's
+  fair value**, and a ladder that is −EV is never highlighted. Everywhere else (ADA, ZEC,
+  XAUT, CC, VVV, LIT, PUMP, …), the pick is labelled a **yield pick** — best net premium/day inside your P(ex)
+  cap, with no edge claim. Every card carries that verdict badge.
 - **Position sizing** — a contracts input scales each ladder into dollar totals: capital
   required, net premium kept, and max loss. Every leg has a copyable instrument name and a
   deep link to the Derive trade ticket.
 - **Greeks & risk** — Black-Scholes delta/gamma/theta/vega, prob-of-exercise, expected ITM
   payoff, and an estimated ~30-day ATM IV via variance interpolation.
-- **Fee-aware yields** — role-aware Derive fees (Maker 0.03% no base, or Taker $0.50 + 0.04%,
-  both capped at 12.5% of the option value) are subtracted from every APR, EV and premium/day.
-- **Deribit reference** — for BTC/ETH, Deribit prices are overlaid on the matrix (▲ richer /
-  ▼ cheaper) **and** used as an independent fair value that unmasks the EV ranking factor.
+- **Fee-aware yields** — Derive V3 fees, read from the live instrument list: maker 0.01% of
+  index, taker 0.03% of index + $0.50 per order (shared across the contracts in the order);
+  the notional part is capped at 12.5% of the option value. Subtracted from every APR, EV and
+  premium/day. MARKET pricing always charges taker (selling into the bid is a taker fill).
+- **Deribit reference** — BTC/ETH (inverse book) and SOL/HYPE/XRP (USDC-linear book) are
+  overlaid on the matrix (▲ richer / ▼ cheaper) **and** used as the independent fair value
+  that unmasks the EV and edge ranking factors.
 - **Honest price modes** — MARK uses venue marks; **Market** uses live best bids only and
   excludes strikes with no resting bid instead of inventing a price.
 
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the data flow and the rationale behind
-the modeling choices (fee provenance, symmetric risk severity, EV masking, the P(any-ex) bound).
+the modeling choices (fee provenance, EV masking, the recommendation gate, the P(any-ex) bound).
 
 ---
 
@@ -55,7 +61,8 @@ Display configuration is generated from live prices in `frontend/config/assets.t
 strikes are filtered to ±40% of the live spot reference (option forward if spot is
 unavailable), and decimal precision scales to the token price. No placeholder spot
 price is used. PUMP strikes, premiums and fees retain sub-cent precision throughout
-the matrix and detail cards. Deribit overlays remain limited to BTC/ETH.
+the matrix and detail cards. Deribit fair values cover BTC/ETH (inverse book) and SOL/HYPE/XRP
+(USDC-linear book) via `DERIBIT_BOOK`; every other market gets yield picks only.
 
 ---
 
@@ -68,18 +75,19 @@ the browser.
 ```text
 frontend/
 ├── app/
-│   ├── page.tsx                    # dashboard shell + asset switcher
-│   ├── layout.tsx                  # metadata, self-hosted font, pre-paint theme script
+│   ├── page.tsx                    # NERV shell: asset tab bar
+│   ├── layout.tsx                  # metadata, self-hosted Source Code Pro
 │   ├── error.tsx                   # App Router error boundary
 │   └── api/derive/
 │       ├── _upstream.ts            # shared validation, edge cache, error mapping
 │       └── */route.ts              # validated, edge-cached Derive v3 adapters (GET)
 ├── components/
 │   ├── DeriveAssetYields.tsx       # orchestrator (state + derived data)
+│   ├── Masthead.tsx                # serif title card + MAGI feed status (spot/options/IV)
 │   ├── YieldMatrix.tsx             # strike×expiry heat-map tables
 │   ├── MatrixCell.tsx              # memoized cell (hover is O(1), not O(cells))
 │   ├── StrategyPanel.tsx           # ladder cards + position sizing + Derive links
-│   ├── ControlBar.tsx              # feed status, filters, fee role, contracts
+│   ├── ControlBar.tsx              # filters, fee role, contracts
 │   └── Tooltips.tsx                # cell/metric tooltips (mouse/keyboard/touch)
 ├── hooks/
 │   ├── useDeriveChain.ts           # 15s poll: spot ∥ instruments → tickers (abortable)

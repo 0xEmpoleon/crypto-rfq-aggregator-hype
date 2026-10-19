@@ -4,6 +4,14 @@
  * Black-76 style: the "underlying" passed everywhere is Derive's forward
  * price (option_pricing.f), so no risk-free-rate term is needed in d1/d2.
  * The only simplification vs full Black-76 is the missing e^{-rT} discount.
+ *
+ * Methodology (revised 2026-10-19 after an adversarial review):
+ *  - Without an INDEPENDENT fair value, every mark-derived "edge" is ≈0 or
+ *    just −fee/−spread by construction. So EV and the edge ratio are scored
+ *    only against a cross-venue Deribit mark; otherwise they are masked and
+ *    the ranking is an honest yield pick (premium/day inside the P(ex) cap).
+ *  - Skew vs ATM is displayed, never ranked: a convex smile makes every
+ *    OTM strike look "rich" without saying anything about mispricing.
  */
 
 export interface Greeks { delta: number; gamma: number; theta: number; vega: number }
@@ -20,7 +28,7 @@ export interface StrategyLeg {
     futuresPrice: number;
     probExercise: number;
     premiumUsd: number;      // gross premium at the selected price source
-    feeUsd: number;          // estimated taker fee per contract
+    feeUsd: number;          // estimated fee per contract at the effective role
     tailLoss: number;        // unconditional expected ITM payoff
     moneyness: number;
     greeks: Greeks;
@@ -29,11 +37,11 @@ export interface StrategyLeg {
 export interface LadderContext {
     /** Per-expiry-label ATM IV (%) — vol edge compares a leg to the ATM of its OWN expiry. */
     atmIvByExpiry: Record<string, number>;
-    /** Under 'mark' pricing EV vs the app's own model is tautologically ~0, so it is
-     *  excluded from ranking unless an independent fair value exists (Deribit / a live bid). */
     priceSource: 'mark' | 'market';
-    /** Optional cross-venue fair value, keyed `TYPE-STRIKE-EXPIRY` (e.g. "C-63000-4JUL26").
-     *  When present for every leg it unmasks the EV factor even under 'mark' pricing. */
+    /** Cross-venue fair value (Deribit mark, USD), keyed `TYPE-STRIKE-EXPIRY`
+     *  (e.g. "C-63000-4JUL26"). The ONLY thing that unmasks EV and the edge
+     *  ratio: a live Derive bid is not independent — Derive's own model value
+     *  is ≈ its mark, so bid-vs-model is just the spread plus fees. */
     deribitMarkByKey?: Record<string, number>;
 }
 
@@ -43,15 +51,21 @@ export interface ScoredLadder {
     topFactor: string;
     ev: number;
     evAnnual: number;
+    /** EV ÷ net premium — the share of the premium that is edge. Equals the
+     *  binary Kelly fraction 1 − E[payoff]/W. Ranked (when independent). */
+    edge: number;
+    /** Strike IV vs same-expiry ATM IV. DISPLAY ONLY — smile shape, not edge. */
     volEdge: number;
     thetaEff: number;
+    /** EV ÷ expected payoff. Display only: monotone in `edge`, so ranking both double-counts. */
     riskReturn: number;
+    /** max(0, edge) — kept for display continuity. */
     kelly: number;
     diversification: number;
     probAllOTM: number;
     /** true when the ladder spans more than one expiry — P(any ex) is then only a LOWER bound. */
     crossExpiry: boolean;
-    /** true when EV was scored against an independent fair value (live bid or Deribit mark). */
+    /** true when EV was scored against an independent fair value (a Deribit mark for every leg). */
     evIsIndependent: boolean;
     totalPrem: number;
     totalFees: number;
@@ -62,39 +76,47 @@ export interface ScoredLadder {
     factorMask: boolean[];
 }
 
-/* ── Derive fee schedule (help.derive.xyz, "What are the fees?") ──────
-   Taker: $0.50 base + 0.04% × spot notional. Maker: 0.03% × spot notional,
-   no base fee. Both capped at 12.5% of the option's value. Per 1 contract.
-   Role matters: hitting a resting bid ('market') is a taker fill; getting
-   filled at ~mark by posting a quote ('mark') is a maker fill. */
+/* ── Derive fee schedule (V3) ─────────────────────────────────────
+   Read live from public/get_all_instruments on 2026-10-19 — every option
+   instrument on BTC/SOL/HYPE/ZEC carried base_fee 0.5, maker_fee_rate
+   0.0001, taker_fee_rate 0.0003, mark_price_fee_rate_cap 0.125. (The old
+   0.03% maker / 0.04% taker figures came from a stale help-centre page.)
+   Per contract: notional fee = rate × index price, capped at 12.5% of the
+   option's value. Takers ALSO pay a $0.50 base fee per TRADE — outside the
+   cap and shared by every contract in the order. Makers pay no base fee.
+   Role follows execution: hitting a resting bid ('market') is a taker
+   fill; a resting quote filled at ~mark is a maker fill. */
 export const DERIVE_TAKER_BASE_USD = 0.5;
-export const DERIVE_TAKER_NOTIONAL_RATE = 0.0004;
-export const DERIVE_MAKER_NOTIONAL_RATE = 0.0003;
+export const DERIVE_TAKER_NOTIONAL_RATE = 0.0003;
+export const DERIVE_MAKER_NOTIONAL_RATE = 0.0001;
 export const DERIVE_FEE_CAP_OF_PREMIUM = 0.125;
 
 export type FeeRole = 'maker' | 'taker';
 
-export function deriveTakerFee(spotNotional: number, premiumUsd: number): number {
-    if (premiumUsd <= 0 || spotNotional <= 0) return 0;
-    return Math.min(
-        DERIVE_TAKER_BASE_USD + DERIVE_TAKER_NOTIONAL_RATE * spotNotional,
-        DERIVE_FEE_CAP_OF_PREMIUM * premiumUsd
-    );
+/** Per-contract taker fee. `contractsPerOrder` amortises the per-trade base fee. */
+export function deriveTakerFee(indexPrice: number, premiumUsd: number, contractsPerOrder = 1): number {
+    if (premiumUsd <= 0 || indexPrice <= 0) return 0;
+    const n = Math.max(1, contractsPerOrder);
+    return Math.min(DERIVE_TAKER_NOTIONAL_RATE * indexPrice, DERIVE_FEE_CAP_OF_PREMIUM * premiumUsd)
+        + DERIVE_TAKER_BASE_USD / n;
 }
 
-export function deriveMakerFee(spotNotional: number, premiumUsd: number): number {
-    if (premiumUsd <= 0 || spotNotional <= 0) return 0;
-    return Math.min(
-        DERIVE_MAKER_NOTIONAL_RATE * spotNotional,
-        DERIVE_FEE_CAP_OF_PREMIUM * premiumUsd
-    );
+/** Per-contract maker fee (no base fee). */
+export function deriveMakerFee(indexPrice: number, premiumUsd: number): number {
+    if (premiumUsd <= 0 || indexPrice <= 0) return 0;
+    return Math.min(DERIVE_MAKER_NOTIONAL_RATE * indexPrice, DERIVE_FEE_CAP_OF_PREMIUM * premiumUsd);
 }
 
 /** Estimated Derive fee for one contract at the given execution role. */
-export function deriveFee(spotNotional: number, premiumUsd: number, role: FeeRole): number {
+export function deriveFee(indexPrice: number, premiumUsd: number, role: FeeRole, contractsPerOrder = 1): number {
     return role === 'maker'
-        ? deriveMakerFee(spotNotional, premiumUsd)
-        : deriveTakerFee(spotNotional, premiumUsd);
+        ? deriveMakerFee(indexPrice, premiumUsd)
+        : deriveTakerFee(indexPrice, premiumUsd, contractsPerOrder);
+}
+
+/** Selling into the live bid can only be a taker fill, whatever the toggle says. */
+export function effectiveFeeRole(priceSource: 'mark' | 'market', chosen: FeeRole): FeeRole {
+    return priceSource === 'market' ? 'taker' : chosen;
 }
 
 /**
@@ -205,55 +227,44 @@ export function combinationsWithRep<T>(arr: T[], k: number): T[][] {
 
 /**
  * Statistical Strategy Scoring.
- * Every dollar figure is net of estimated taker fees.
+ * Every dollar figure is net of estimated fees.
  */
 export function scoreStrategy(legs: StrategyLeg[], ctx: LadderContext) {
     const n = legs.length;
-    let totalEv = 0, totalRisk = 0, totalPrem = 0, totalFees = 0, totalApr = 0,
+    let totalEv = 0, totalPayoff = 0, totalPrem = 0, totalFees = 0, totalNetPrem = 0, totalApr = 0,
         volEdgeSum = 0, volEdgeCount = 0, thetaSum = 0, dteExactSum = 0,
         maxLossUsd = 0, independentEvLegs = 0;
 
     for (const l of legs) {
         const T = l.tYears;
         const dteExact = Math.max(T * 365, 1 / 24);
-        const pITM = l.probExercise;
         const netPrem = Math.max(0, l.premiumUsd - (l.feeUsd || 0));
 
         // Short-seller EV = net credit − expected exercise payoff. The payoff
-        // benchmark is an INDEPENDENT fair value when one exists — a live bid
-        // ('market'), or the matching Deribit mark ('mark') — otherwise the
-        // app's own model, where EV is tautologically ~0 and gets masked below.
+        // benchmark must be INDEPENDENT of the price being sold: a Deribit mark
+        // for the same strike/expiry. Without one, the fallback is Derive's own
+        // model (tailLoss, priced off Derive's mark IV and forward ≈ the mark),
+        // which makes EV ≈ −fee (MARK) or −spread−fee (MARKET) by construction —
+        // computed for display, masked from ranking below.
         const dKey = `${l.type === 'Call' ? 'C' : 'P'}-${l.strike}-${l.expiry}`;
-        const deribitMark = ctx.deribitMarkByKey?.[dKey];
-        let ev: number;
-        if (ctx.priceSource === 'market') {
-            ev = netPrem - l.tailLoss;            // live bid vs own model — independent
-            independentEvLegs++;
-        } else if (deribitMark && deribitMark > 0) {
-            ev = netPrem - deribitMark;           // Derive mark vs Deribit fair value — independent
-            independentEvLegs++;
-        } else {
-            ev = netPrem - l.tailLoss;            // own mark vs own model — ≈0 by construction
-        }
+        const fair = ctx.deribitMarkByKey?.[dKey];
+        const hasFair = fair != null && fair > 0;
+        if (hasFair) independentEvLegs++;
+        const payoff = hasFair ? fair : l.tailLoss;
 
-        // Ranking severity: model-consistent expected shortfall given exercise
-        // = tailLoss / pITM (tailLoss is the UNCONDITIONAL expected ITM payoff).
-        // pITM-weighting it gives Σ tailLoss — one coherent scale for puts AND
-        // calls, so Risk/Return and Kelly are comparable across both panels.
-        // (The old code charged puts strike-to-zero but calls a 2σ proxy.)
-        totalRisk += l.tailLoss;
+        totalEv += netPrem - payoff;
+        totalPayoff += payoff;
 
         // Structural worst case for DISPLAY only: collateral (strike for CSP,
         // 1 coin at spot for a covered call) to zero, net of premium.
         maxLossUsd += Math.max(0, (l.type === 'Put' ? l.strike : l.futuresPrice) - netPrem);
 
-        totalEv += ev;
         totalPrem += l.premiumUsd;
         totalFees += l.feeUsd || 0;
+        totalNetPrem += netPrem;
         totalApr += l.apr;
         dteExactSum += dteExact;
-        // Vol edge is a SKEW reading: this strike's IV vs the ATM IV of the
-        // SAME expiry (term structure must not masquerade as strike richness).
+        // Skew reading: this strike's IV vs the ATM IV of the SAME expiry.
         const atm = ctx.atmIvByExpiry[l.expiry];
         if (atm && atm > 0) { volEdgeSum += (l.markIv - atm) / atm; volEdgeCount++; }
         thetaSum += netPrem / dteExact;
@@ -268,38 +279,32 @@ export function scoreStrategy(legs: StrategyLeg[], ctx: LadderContext) {
     const evAnnual = (totalEv / n) * (365 / avgDte);
     const volEdge = volEdgeCount > 0 ? volEdgeSum / volEdgeCount : 0;
     const thetaEff = thetaSum / n;
-    const riskReturn = totalRisk > 0 ? totalEv / totalRisk : 0;
+    // Edge ratio: a seller keeps W, and on exercise (prob p) pays L given
+    // exercise. Binary Kelly f = (1−p) − p·(L−W)/W = 1 − p·L/W = 1 − E[payoff]/W
+    // = EV/W. (The old form subtracted p a second time, so it was always 0.)
+    const edge = totalNetPrem > 0 ? totalEv / totalNetPrem : 0;
+    const riskReturn = totalPayoff > 0 ? totalEv / totalPayoff : 0;
+    const kelly = Math.max(0, edge);
 
     const maxPex = Math.max(...legs.map(l => l.probExercise));
     // Exact for single-expiry same-type ladders (ITM events nest by strike).
     // For cross-expiry ladders this is only a LOWER bound on P(any exercise).
     const probAllOTM = 1 - maxPex;
     const crossExpiry = new Set(legs.map(l => l.expiry)).size > 1;
-    const avgLoss = totalRisk / Math.max(maxPex, 0.01);
 
-    const netTotalPrem = Math.max(0, totalPrem - totalFees);
-    const kelly = netTotalPrem > 0 ? Math.max(0, probAllOTM - maxPex * avgLoss / netTotalPrem) : 0;
     const strikes = legs.map(l => l.strike);
     const diversification = (Math.max(...strikes) - Math.min(...strikes)) / fp0;
 
-    const factors = [evAnnual, Math.max(0, volEdge), riskReturn, thetaEff, kelly, diversification];
-    // A factor only participates in ranking when it carries information:
-    // EV needs an independent fair value for EVERY leg (a live bid, or a
-    // Deribit mark) — otherwise it is own-mark-vs-own-model (≈0) and masked;
-    // vol edge is meaningless without an ATM reference for the expiry.
+    const factors = [evAnnual, edge, thetaEff, diversification];
+    // EV and the edge ratio carry information only against an independent
+    // fair value for EVERY leg; otherwise they are own-mark-vs-own-model.
     const evIsIndependent = independentEvLegs === n;
-    const factorMask = [
-        evIsIndependent,
-        volEdgeCount === n,
-        true,
-        true,
-        true,
-        true,
-    ];
+    const factorMask = [evIsIndependent, evIsIndependent, true, true];
 
     return {
         ev: totalEv,
         evAnnual,
+        edge,
         volEdge,
         thetaEff,
         riskReturn,
@@ -317,8 +322,11 @@ export function scoreStrategy(legs: StrategyLeg[], ctx: LadderContext) {
     };
 }
 
-const FACTOR_WEIGHTS = [0.30, 0.20, 0.20, 0.15, 0.10, 0.05];
-const FACTOR_NAMES = ['Expected Value', 'Vol Edge', 'Risk/Return', 'Theta', 'Kelly', 'Diversification'];
+/* Weights are renormalised over the active factors. With a fair value:
+   EV 37.5% · edge 37.5% · premium/day 18.75% · diversification 6.25%.
+   Without one (yield pick): premium/day 75% · diversification 25%. */
+const FACTOR_WEIGHTS = [0.30, 0.30, 0.15, 0.05];
+const FACTOR_NAMES = ['Expected Value', 'Edge / premium', 'Premium / day', 'Diversification'];
 
 /**
  * Min-max normalizes factors ACROSS THE WHOLE candidate pool and ranks by
@@ -364,6 +372,15 @@ export function rankLadders(candidates: any[]): ScoredLadder[] {
     }).sort((a, b) => b.score - a.score);
 }
 
+/** Picks `k` items spread evenly across `arr` (always keeps both ends). */
+export function spreadPick<T>(arr: T[], k: number): T[] {
+    if (arr.length <= k) return arr;
+    if (k <= 1) return arr.slice(0, Math.max(0, k));
+    const out: T[] = [];
+    for (let i = 0; i < k; i++) out.push(arr[Math.round(i * (arr.length - 1) / (k - 1))]);
+    return out;
+}
+
 /**
  * Generates scored (unranked) ladder candidates for one leg count.
  */
@@ -400,7 +417,12 @@ export function generateLadderCandidates(trades: StrategyLeg[], type: 'Call' | '
     }
 
     for (const [, expTrades] of Array.from(byExpiry.entries())) {
-        const opts = expTrades.sort((a, b) => type === 'Call' ? a.strike - b.strike : b.strike - a.strike).slice(0, perExpiryCap);
+        // Sample strikes EVENLY across the eligible range, not the N nearest
+        // the money — nearest-N packs every candidate against the P(ex) cap.
+        const opts = spreadPick(
+            expTrades.sort((a, b) => type === 'Call' ? a.strike - b.strike : b.strike - a.strike),
+            perExpiryCap
+        );
         if (!allowRep && opts.length < numLegs) continue;
         const combos = allowRep ? combinationsWithRep(opts, numLegs) : combinations(opts, numLegs);
         for (const combo of combos) pushCombo(combo);
@@ -416,20 +438,46 @@ export function generateLadderCandidates(trades: StrategyLeg[], type: 'Call' | '
     return allCandidates;
 }
 
+export type RecommendationKind = 'edge' | 'negative' | 'yield';
+
+export interface LadderPick {
+    best: ScoredLadder;
+    poolSize: number;
+    /** true when the pool was ranked on EV against Deribit fair values. */
+    edgeMode: boolean;
+    kind: RecommendationKind;
+}
+
 /**
  * Core Strategy Finder.
  * Collects candidates for EVERY requested leg count into ONE pool and ranks
  * them in a single normalization pass, so scores are comparable across leg
- * counts (previously each count was normalized against only its own pool).
+ * counts. When at least two candidates are fully covered by an independent
+ * fair value, ONLY those are ranked (edge mode) — mixing them with uncovered
+ * candidates would silently mask EV for the whole pool.
  */
-export function findBestLadder(trades: StrategyLeg[], type: 'Call' | 'Put', ctx: LadderContext, legCounts: number[], allowRep: boolean): { best: ScoredLadder; poolSize: number } | null {
+export function findBestLadder(trades: StrategyLeg[], type: 'Call' | 'Put', ctx: LadderContext, legCounts: number[], allowRep: boolean): LadderPick | null {
     const pool: any[] = [];
     for (const n of legCounts) {
         pool.push(...generateLadderCandidates(trades, type, ctx, n, allowRep));
     }
     if (!pool.length) return null;
-    const ranked = rankLadders(pool);
-    return { best: ranked[0], poolSize: ranked.length };
+    const covered = pool.filter(c => c.evIsIndependent);
+    const edgeMode = covered.length >= 2;
+    const ranked = rankLadders(edgeMode ? covered : pool);
+    const best = ranked[0];
+    const kind: RecommendationKind = edgeMode ? (best.ev > 0 ? 'edge' : 'negative') : 'yield';
+    return { best, poolSize: ranked.length, edgeMode, kind };
+}
+
+/**
+ * Absolute gate on top of the relative score: a pool of one carries no
+ * ranking information, and a ladder that is −EV against an independent fair
+ * value is never highlighted, however well it ranks against its peers.
+ */
+export function isRecommended(pick: LadderPick | null, minScore: number): boolean {
+    if (!pick || pick.poolSize <= 1 || pick.best.score < minScore) return false;
+    return pick.kind !== 'negative';
 }
 
 /**

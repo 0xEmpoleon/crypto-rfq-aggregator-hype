@@ -15,7 +15,8 @@ for (const [asset, spot] of [['VVV', 30], ['LIT', 4.8], ['PUMP', 0.0045], ['NEWC
             await expect(page.getByRole('rowheader', { name: '$0.0048', exact: true }).first()).toBeVisible();
             await page.getByRole('button', { name: /^Call 0.0045 / }).click();
             await expect(page.getByText('$0.000216', { exact: true })).toBeVisible();
-            await expect(page.getByText('−$0.00000135', { exact: true }).last()).toBeVisible();
+            // V3 maker fee: 0.01% × $0.0045 index (well under the 12.5%-of-premium cap)
+            await expect(page.getByText('−$0.00000045', { exact: true }).last()).toBeVisible();
         }
         await page.reload();
         await expect(page.getByRole('button', { name: asset, exact: true })).toHaveAttribute('aria-pressed', 'true');

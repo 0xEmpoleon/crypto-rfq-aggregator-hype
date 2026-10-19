@@ -81,7 +81,9 @@ export function useDeriveChain(asset: AssetSymbol): DeriveChain {
 
                 let currentSpot = 0;
                 if (spotRes.status === 'fulfilled') {
-                    currentSpot = +(spotRes.value.result?.mark_price || 0);
+                    // Spot = the index (what fees and covered-call collateral are
+                    // valued at); the PERP mark is only a fallback.
+                    currentSpot = +(spotRes.value.result?.index_price || spotRes.value.result?.mark_price || 0);
                 }
                 if (currentSpot > 0) { setSpot(currentSpot); ns.spot = 'ok'; } else ns.spot = 'err';
 

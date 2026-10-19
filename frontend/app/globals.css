@@ -1,101 +1,63 @@
 /* ═══════════════════════════════════════════════════════════════════
-   Design System — Derive.xyz Inspired Dark Slate Trading Terminal
-   
-   Palette: Slate-950 background, slate-900 panels, slate-800 borders
-   Text: slate-50 primary, slate-400 muted
-   Accents: green-500 (#22C55E), red-500 (#EF4444), blue-600 (#2563EB)
-   Font: Inter (tabular-nums for data alignment)
+   Design System — NERV / Evangelion terminal
+   Same canonical sheet as the report panel and research dossiers
+   (~/.claude/skills/crypto-dossier/assets/nerv-dossier.css):
+   black + interface orange, amber section heads, Eva-01 green,
+   red faults, purple unit badges, zero radius, Source Code Pro data,
+   Times serif masthead, 45° hazard stripe.
+
+   App semantics on top of the palette:
+     calls  → orange      puts → green
+     pinned → purple      focus / links → amber
    ═══════════════════════════════════════════════════════════════════ */
 
 :root {
-  /* Derive.xyz slate palette */
-  --bg-main: #020617;
-  /* slate-950 */
-  --bg-panel: #0F172A;
-  /* slate-900 */
-  --bg-card: #1E293B;
-  /* slate-800 — subtle card/hover bg */
-  --bg-row-hover: rgba(30, 41, 59, 0.5);
-  /* slate-800/50 */
+  /* canonical NERV palette */
+  --bg: #050505;
+  --orange: #FF6E1E;
+  --amber: #FFB300;
+  --green: #8CFF3C;
+  --red: #FF2A2A;
+  --purple: #8A6BC1;
+  --dim: #5a5148;
+  --panel: #0D0B08;
+  --card: #0A0805;
+  --line: #2a2118;
+  --line2: #17130d;
+  --txt: #b7ae9f;
+  --txt2: #9a9082;
 
-  --text-primary: #F8FAFC;
-  /* slate-50 */
-  --text-secondary: #94A3B8;
-  /* slate-400 */
-  --text-muted: #7C8AA0;
-  /* raised from slate-500 (#64748B, 3.75:1) so small 10–11px labels clear AA */
+  /* app aliases (components read these) */
+  --bg-main: var(--bg);
+  --bg-panel: var(--panel);
+  --bg-card: var(--card);
+  --text-primary: #F2EBDF;
+  --text-secondary: var(--txt);
+  /* Canonical --dim (#5a5148) is ~2.6:1 on black — fine for rules, too faint
+     for 10–11px labels. Muted TEXT uses this warmer step (≈5:1, AA). */
+  --text-muted: #8a7f70;
+  --border-color: var(--line);
+  --border-strong: #3a2f22;
 
-  --border-color: #1E293B;
-  /* slate-800 */
-  --border-strong: #334155;
-  /* slate-700 */
+  --call: var(--orange);
+  --put: var(--green);
+  --pin: var(--purple);
+  --link: var(--amber);
 
-  /* Trading accent colors */
-  --green: #22C55E;
-  /* green-500 — profit/puts */
-  --red: #EF4444;
-  /* red-500 — loss */
-  --blue: #2563EB;
-  /* blue-600 — spot price badge */
-  --orange: #F97316;
-  /* orange-500 — active indicator */
-  --yellow: #EAB308;
-  /* yellow-500 — calls */
+  /* Selected control surface — the report panel's FIRE button */
+  --active-bg: var(--orange);
+  --active-fg: #000;
 
-  /* Selected control surface (asset tabs, theme toggle hover) */
-  --active-bg: #334155;
-  --active-fg: #F8FAFC;
+  --font-ui: var(--font-mono), "Source Code Pro", "SF Mono", Menlo, monospace;
+  --font-serif: "Times New Roman", Georgia, serif;
 
-  /* Typography — Inter is self-hosted via next/font (no render-blocking @import) */
-  --font-ui: var(--font-inter), -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-
-  --t-nav: 1rem;
-  /* 16px — navigation tabs */
-  --t-title: 0.9375rem;
-  /* 15px — section headers */
-  --t-data: 0.8125rem;
-  /* 13px — cell data, prices */
-  --t-label: 0.75rem;
-  /* 12px — column headers, labels */
-  --t-meta: 0.6875rem;
-  /* 11px — timestamps, subscripts */
-  --t-micro: 0.625rem;
-  /* 10px — P(exercise) */
-  --t-hero: 1.15rem;
-  /* 18px — featured APY */
-}
-
-/* Light mode — Rysk.finance inspired warm beige/parchment */
-[data-theme='light'] {
-  --bg-main: #E7E3D4;
-  /* warm parchment */
-  --bg-panel: #F1EFE6;
-  /* lighter beige panels */
-  --bg-card: #F5F3EC;
-  /* subtle card lift */
-  --bg-row-hover: rgba(0, 0, 0, 0.04);
-  --text-primary: #000000;
-  /* pure black */
-  --text-secondary: #3D3D3D;
-  /* dark grey */
-  --text-muted: #6B6B6B;
-  /* mid grey */
-  --border-color: #000000;
-  /* solid black borders */
-  --border-strong: #000000;
-  /* Accents darkened for AA text contrast on the parchment (#4ADE80 was
-     1.5:1, #D4A017 was 2.1:1). The heat-map fill is a separate hardcoded
-     rgba in heatColor(), so it is unaffected. */
-  --green: #15803D;
-  /* emerald-700 */
-  --yellow: #A16207;
-  /* amber-700 */
-  --blue: #2563EB;
-  --red: #DC2626;
-  /* Selected control surface — a distinct highlight instead of the black
-     border colour, which was invisible under black text. */
-  --active-bg: #1E293B;
-  --active-fg: #FFFFFF;
+  --t-nav: 0.6875rem;   /* 11px — nav tabs, tracked */
+  --t-title: 0.8125rem; /* 13px — amber section heads */
+  --t-data: 0.75rem;    /* 12px — cell data, prices */
+  --t-label: 0.6875rem; /* 11px — column heads, labels */
+  --t-meta: 0.6875rem;  /* 11px — timestamps, explanations */
+  --t-micro: 0.625rem;  /* 10px — P(exercise), badges */
+  --t-hero: 1.625rem;   /* 26px — serif ladder APR */
 }
 
 /* Reset */
@@ -103,6 +65,11 @@
   box-sizing: border-box;
   padding: 0;
   margin: 0;
+  border-radius: 0 !important;
+}
+
+html {
+  color-scheme: dark;
 }
 
 html,
@@ -113,16 +80,28 @@ body {
 
 body {
   font-family: var(--font-ui);
-  background: var(--bg-main);
+  font-size: 13px;
+  line-height: 1.5;
+  background: var(--bg);
+  background-image: radial-gradient(circle at 50% -20%, #1a0f00 0, transparent 60%);
   color: var(--text-primary);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
+a {
+  color: var(--link);
+}
+
+button,
+input {
+  font-family: inherit;
+}
+
 /* Keyboard focus — the matrix alone has 100+ tab stops, so a visible ring
    is essential. Only shown for keyboard focus, never on mouse click. */
 :focus-visible {
-  outline: 2px solid var(--blue);
+  outline: 2px solid var(--amber);
   outline-offset: 1px;
 }
 
@@ -132,91 +111,690 @@ td:focus-visible {
   outline-offset: -2px;
 }
 
-/* Native controls adopt the theme accent in both light and dark. */
 input[type='range'],
 input[type='checkbox'],
 input[type='number'] {
-  accent-color: var(--blue);
+  accent-color: var(--orange);
 }
 
-/* Honour the OS "reduce motion" preference. */
-@media (prefers-reduced-motion: reduce) {
-
-  .pulse {
-    animation: none;
-    opacity: 0.75;
-  }
-
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-  }
-}
-
-/* Container — viewport-locked */
+/* ── Shell: viewport-locked terminal ──────────────────────────────── */
 .container {
   width: 100%;
   height: 100vh;
-  padding: 8px 12px 4px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
 
-/* Header — clean, minimal */
-.header {
+/* Sticky tab bar — the asset switcher IS the navigation. */
+#nav {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--card);
+  overflow-x: auto;
+  position: sticky;
+  top: 0;
+  z-index: 30;
+}
+
+#nav .brand {
+  color: var(--orange);
+  font-size: var(--t-nav);
+  letter-spacing: 0.2em;
+  padding: 10px 18px 10px 0;
+  margin-right: 6px;
+  border-right: 1px solid var(--line);
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+}
+
+#nav button {
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  color: var(--text-muted);
+  font-size: var(--t-nav);
+  letter-spacing: 0.2em;
+  padding: 10px 14px 8px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+#nav button .tri {
+  margin-right: 6px;
+}
+
+#nav button:hover {
+  color: var(--amber);
+}
+
+#nav button[aria-pressed='true'] {
+  color: var(--orange);
+  border-bottom-color: var(--orange);
+}
+
+/* Masthead: serif title card + MAGI status block */
+#card {
+  flex: 0 0 auto;
   display: flex;
   justify-content: space-between;
-  align-items: center;
-  padding-bottom: 6px;
-  border-bottom: 1px solid var(--border-color);
-  flex: 0 0 auto;
+  align-items: flex-end;
+  gap: 16px 24px;
+  flex-wrap: wrap;
+  padding: 12px 16px 10px;
+  border-bottom: 2px solid var(--orange);
 }
 
-.header h1 {
-  font-size: var(--t-nav);
-  font-weight: 700;
-  letter-spacing: -0.01em;
-  line-height: 1;
-  color: var(--text-primary);
+#card h1 {
+  font-family: var(--font-serif);
+  font-weight: 900;
+  font-size: clamp(22px, 2.4vw, 32px);
+  line-height: 1.02;
+  color: #fff;
+  letter-spacing: 0.01em;
 }
 
-/* Panel — dark card with subtle border */
-.neo-panel {
-  background: var(--bg-panel);
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
-  padding: 6px 8px;
-  position: relative;
+#card h1 em {
+  font-style: normal;
+  color: var(--orange);
 }
 
-/* Folder tab — subtle, rounded */
-.neo-folder-tab {
-  background: var(--bg-card);
-  color: var(--text-secondary);
-  display: inline-flex;
-  align-items: center;
-  padding: 2px 8px;
-  font-family: var(--font-ui);
-  font-weight: 500;
+#card .sub {
+  color: var(--text-muted);
   font-size: var(--t-micro);
-  border-radius: 4px 4px 0 0;
-  position: absolute;
-  top: -16px;
-  left: 0;
-  height: 16px;
-  border: 1px solid var(--border-color);
-  border-bottom: 1px solid var(--bg-panel);
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  margin-top: 6px;
+}
+
+#magi {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 5px;
+  font-size: var(--t-micro);
+  letter-spacing: 0.15em;
+  color: var(--amber);
+  text-transform: uppercase;
+}
+
+#magi .clock {
+  color: var(--orange);
+  font-size: 15px;
+  letter-spacing: 0.08em;
+  font-variant-numeric: tabular-nums;
+}
+
+#magi .clock small {
+  color: var(--text-muted);
+  font-size: var(--t-micro);
+  letter-spacing: 0.15em;
+  margin-left: 10px;
+}
+
+#magi .clock small.soon {
+  color: var(--red);
+}
+
+#magi .verdict b {
+  color: var(--green);
+  font-weight: 700;
+}
+
+#magi .verdict.warn b {
+  color: var(--amber);
+}
+
+#magi .verdict.fault b {
+  color: var(--red);
+  animation: blink 1s step-end infinite;
+}
+
+.magi-units {
+  display: flex;
+  gap: 4px;
+}
+
+/* One unit per data feed — the app happens to have exactly three. */
+.magi-unit {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--amber);
+  background: var(--panel);
+  padding: 2px 8px 3px;
+  min-width: 104px;
+  line-height: 1.3;
+}
+
+.magi-unit .nm {
+  color: var(--text-muted);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+}
+
+.magi-unit .feed {
+  color: var(--text-primary);
+  font-size: var(--t-micro);
+  letter-spacing: 0.12em;
+}
+
+.magi-unit .feed b {
+  font-weight: 700;
+  margin-left: 6px;
+}
+
+.magi-unit.ok { border-left-color: var(--green); }
+.magi-unit.ok .feed b { color: var(--green); }
+.magi-unit.load { border-left-color: var(--amber); }
+.magi-unit.load .feed b { color: var(--amber); }
+.magi-unit.err { border-left-color: var(--red); border-color: #5a2a2a; }
+.magi-unit.err .feed b { color: var(--red); }
+
+.stripe {
+  flex: 0 0 auto;
+  height: 8px;
+  background: repeating-linear-gradient(-45deg, var(--orange) 0 14px, #000 14px 28px);
+  opacity: 0.85;
+}
+
+/* Main working area between the stripe and the footer bar */
+.deck {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 6px 16px 8px;
+  overflow: hidden;
+}
+
+/* Fixed-feel footer bar (last flex row of the locked shell) */
+#foot {
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  background: var(--panel);
+  border-top: 1px solid var(--orange);
+  color: var(--text-muted);
+  font-size: var(--t-micro);
+  letter-spacing: 0.14em;
+  padding: 6px 16px;
+}
+
+#foot b {
+  color: var(--orange);
+  font-weight: 400;
+}
+
+#foot span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#foot span:last-child {
+  white-space: nowrap;
+}
+
+/* ── Sections ─────────────────────────────────────────────────────── */
+
+/* Amber section head with a trailing hairline — the dossier h2. */
+.sec-h {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: var(--t-title);
+  font-weight: 400;
+  color: var(--amber);
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.sec-h::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+  min-width: 24px;
+}
+
+/* Panel — hairline box on the panel tone */
+.neo-panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  padding: 8px 10px;
+  position: relative;
 }
 
 /* Side-by-side panels (strategy cards, CC/CSP matrices) */
 .two-col {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 16px;
+  gap: 12px;
+}
+
+/* Purple unit badge (report-panel .unit / dossier .tag) */
+.unit {
+  display: inline-block;
+  font-size: 9px;
+  letter-spacing: 0.15em;
+  padding: 1px 7px;
+  border: 1px solid var(--purple);
+  color: var(--purple);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* Segmented control: FIRE-orange when pressed, hairline when not */
+.seg {
+  display: inline-flex;
+  border: 1px solid var(--border-strong);
+}
+
+.seg button {
+  background: transparent;
+  border: 0;
+  color: var(--text-muted);
+  font-size: var(--t-micro);
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  min-height: 22px;
+  cursor: pointer;
+}
+
+.seg button + button {
+  border-left: 1px solid var(--border-strong);
+}
+
+.seg button:hover {
+  color: var(--amber);
+}
+
+.seg button[aria-pressed='true'] {
+  background: var(--active-bg);
+  color: var(--active-fg);
+}
+
+/* Outline button (report-panel .logbtn) */
+.btn-line {
+  background: none;
+  border: 1px solid var(--border-strong);
+  color: var(--text-secondary);
+  font-size: var(--t-micro);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 3px 10px;
+  cursor: pointer;
+}
+
+.btn-line:hover {
+  border-color: var(--orange);
+  color: var(--orange);
+}
+
+.btn-line.danger {
+  border-color: var(--red);
+  color: var(--red);
+}
+
+/* ── Control bar ──────────────────────────────────────────────────── */
+.ctl {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 22px;
+  padding: 2px 0 6px;
+  border-bottom: 1px solid var(--line);
+  color: var(--text-secondary);
+  font-size: var(--t-micro);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.ctl-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ctl-item input[type='range'] {
+  width: 80px;
+  cursor: pointer;
+}
+
+.ctl-val {
+  color: var(--orange);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+input.num {
+  width: 64px;
+  min-height: 22px;
+  padding: 1px 6px;
+  font-size: var(--t-meta);
+  text-align: right;
+  background: var(--card);
+  color: var(--text-primary);
+  border: 1px solid var(--border-strong);
+  font-variant-numeric: tabular-nums;
+}
+
+input.num:focus {
+  border-color: var(--orange);
+}
+
+/* Section row: amber head + its tools on one line */
+.sec-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 18px;
+  margin-bottom: 4px;
+}
+
+.sec-tools {
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  font-size: var(--t-micro);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.readout {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.readout b {
+  color: var(--text-primary);
+  font-weight: 700;
+}
+
+.exp-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 6px;
+  color: var(--text-muted);
+  font-size: var(--t-micro);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.exp-row > span {
+  margin-right: 6px;
+}
+
+/* Stale-data banner */
+.stale {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 4px 10px;
+  border: 1px solid #5a2a2a;
+  background: #140a08;
+  color: var(--text-primary);
+  font-size: var(--t-meta);
+}
+
+.stale b {
+  color: var(--red);
+  letter-spacing: 0.16em;
+  animation: blink 1s step-end infinite;
+}
+
+/* Expiry include/exclude chips */
+.chip {
+  background: var(--card);
+  border: 1px solid var(--border-strong);
+  color: var(--text-primary);
+  font-size: var(--t-micro);
+  letter-spacing: 0.08em;
+  padding: 1px 6px;
+  min-height: 22px;
+  cursor: pointer;
+}
+
+.chip:hover {
+  border-color: var(--orange);
+}
+
+.chip[aria-pressed='false'] {
+  background: transparent;
+  border-color: var(--line);
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+
+/* ── Strategy cards ───────────────────────────────────────────────── */
+.sc-card {
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent, var(--orange));
+  background: linear-gradient(180deg, #120b04, var(--card) 70%);
+  overflow: hidden;
+}
+
+.sc-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 6px 10px 4px;
+}
+
+.sc-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--accent);
+  font-size: var(--t-label);
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.sc-score {
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  font-size: var(--t-micro);
+  padding: 0 6px;
+  letter-spacing: 0.06em;
+  font-variant-numeric: tabular-nums;
+}
+
+.sc-meta {
+  color: var(--text-muted);
+  font-size: var(--t-micro);
+  letter-spacing: 0.06em;
+  margin-top: 2px;
+}
+
+.sc-apr {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.sc-apr .v {
+  font-family: var(--font-serif);
+  font-weight: 900;
+  font-size: var(--t-hero);
+  line-height: 1;
+  color: #fff;
+}
+
+.sc-apr .k {
+  color: var(--text-muted);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  margin-top: 3px;
+}
+
+.sc-legs {
+  padding: 0 10px 4px;
+  font-size: var(--t-meta);
+  font-variant-numeric: tabular-nums;
+}
+
+.sc-leg {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+  border-top: 1px solid var(--line2);
+  color: var(--text-secondary);
+}
+
+.sc-leg:first-child {
+  border-top: 0;
+}
+
+.sc-leg .tri {
+  color: var(--accent);
+  margin-right: 2px;
+}
+
+.sc-size {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 14px;
+  padding: 4px 10px;
+  border-top: 1px solid var(--line);
+  background: var(--panel);
+  font-size: var(--t-meta);
+}
+
+.sc-size b {
+  color: var(--text-primary);
+}
+
+.sc-size a {
+  margin-left: auto;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-decoration: none;
+  text-transform: uppercase;
+  font-size: var(--t-micro);
+}
+
+.sc-size a:hover {
+  color: var(--orange);
+}
+
+.sc-notes {
+  padding: 5px 10px 6px;
+  border-top: 1px solid var(--line);
+  font-size: var(--t-meta);
+  color: var(--text-muted);
+  line-height: 1.55;
+}
+
+.sc-notes .hl {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.sc-notes .ac {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.sc-empty {
+  border: 1px dashed var(--border-strong);
+  background: var(--card);
+  padding: 10px;
+  color: var(--text-muted);
+  font-size: var(--t-meta);
+}
+
+/* Dashed-underline self-explaining label */
+.meta-label {
+  border-bottom: 1px dashed var(--text-muted);
+  cursor: help;
+}
+
+.meta-label:hover {
+  color: var(--amber);
+  border-bottom-color: var(--amber);
+}
+
+/* ── Yield matrix ─────────────────────────────────────────────────── */
+.side-h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--t-label);
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  color: var(--accent);
+  text-transform: uppercase;
+  margin-bottom: 4px;
+  flex: 0 0 auto;
+}
+
+.side-h::before {
+  content: "";
+  width: 10px;
+  height: 10px;
+  background: var(--accent);
+}
+
+.mx {
+  width: 100%;
+  border-collapse: collapse;
+  border-spacing: 0;
+}
+
+.mx thead {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--card);
+}
+
+.mx thead th {
+  font-size: 9.5px;
+  font-weight: 400;
+  letter-spacing: 0.1em;
+  color: var(--text-muted);
+  text-align: center;
+  padding: 5px 4px;
+  border-bottom: 1px solid var(--border-strong);
+  white-space: nowrap;
+}
+
+.mx tbody th {
+  font-size: var(--t-data);
+  font-weight: 700;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--line2);
+  border-right: 1px solid var(--line);
+  color: #fff;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.mx td {
+  border-bottom: 1px solid var(--line2);
 }
 
 /* Screen-reader-only content (table captions etc.) */
@@ -238,15 +816,34 @@ input[type='number'] {
   50% { opacity: 0.35; }
 }
 
+@keyframes blink {
+  50% { opacity: 0; }
+}
+
 .pulse {
   animation: pulse-fade 1.4s ease-in-out infinite;
 }
 
-/* ── Mobile / narrow screens ─────────────────────────────────────────
-   The desktop layout is a viewport-locked trading terminal; below 900px
-   the page scrolls normally, panels stack, and wide tables pan sideways. */
-@media (max-width: 900px) {
+/* Honour the OS "reduce motion" preference. */
+@media (prefers-reduced-motion: reduce) {
+  .pulse {
+    animation: none;
+    opacity: 0.75;
+  }
 
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ── Mobile / narrow screens ─────────────────────────────────────────
+   The desktop layout is a viewport-locked terminal; below 900px the page
+   scrolls normally, panels stack, and wide tables pan sideways. */
+@media (max-width: 900px) {
   html,
   body {
     overflow: auto;
@@ -259,6 +856,10 @@ input[type='number'] {
     overflow: visible;
   }
 
+  .deck {
+    overflow: visible;
+  }
+
   .two-col {
     grid-template-columns: 1fr;
   }
@@ -267,9 +868,85 @@ input[type='number'] {
     overflow-x: auto;
   }
 
+  #magi {
+    align-items: flex-start;
+  }
+
+  /* Strategy card head stacks: title block, then the serif APR. */
+  .sc-head,
+  .sc-title,
+  .sc-leg {
+    flex-wrap: wrap;
+  }
+
+  .sc-apr {
+    text-align: left;
+  }
+
+  #foot {
+    position: sticky;
+    bottom: 0;
+    letter-spacing: 0.08em;
+  }
+
   /* Cap each matrix so it scrolls internally — keeps the sticky
      strike/expiry header working while the page itself also scrolls. */
   .table-scroll {
     max-height: 70vh;
   }
+}
+
+@media (max-width: 560px) {
+  .magi-units {
+    flex-wrap: wrap;
+  }
+
+  .magi-unit {
+    min-width: 0;
+  }
+
+  #foot span:last-child {
+    display: none;
+  }
+}
+
+.readout-b {
+  color: var(--text-primary);
+  font-weight: 400;
+}
+
+.seg button:disabled {
+  color: var(--dim);
+  cursor: not-allowed;
+  text-decoration: line-through;
+}
+
+/* Live market-discovery status, right end of the tab bar */
+#nav .discovery {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-left: 16px;
+  color: var(--text-muted);
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+
+#nav .discovery.stale {
+  color: var(--amber);
+}
+
+#nav .discovery button {
+  border: 1px solid var(--amber);
+  color: var(--amber);
+  padding: 2px 8px;
+  font-size: 9.5px;
+  letter-spacing: 0.12em;
+}
+
+#nav .discovery button:hover {
+  background: var(--amber);
+  color: #000;
 }

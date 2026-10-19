@@ -1,11 +1,14 @@
-import type { Metadata } from "next";
-import { Inter } from "next/font/google";
+import type { Metadata, Viewport } from "next";
+import { Source_Code_Pro } from "next/font/google";
 import "./globals.css";
 
-const inter = Inter({
+// NERV data face. Self-hosted via next/font (no render-blocking @import, and
+// the CSP's font-src 'self' stays intact). The masthead serif is a system
+// Times stack, so it needs no download.
+const mono = Source_Code_Pro({
     subsets: ["latin"],
-    weight: ["400", "500", "600", "700", "800"],
-    variable: "--font-inter",
+    weight: ["400", "600", "700", "900"],
+    variable: "--font-mono",
     display: "swap",
 });
 
@@ -14,7 +17,7 @@ const description =
     "live strike×expiry APR matrix net of fees, Black-Scholes risk metrics, and Deribit cross-venue reference.";
 
 export const metadata: Metadata = {
-    title: "Option Strategist — Derive Covered-Call & CSP Yields",
+    title: "NERV // Option Strategist — Derive Covered-Call & CSP Yields",
     description,
     openGraph: {
         title: "Option Strategist",
@@ -29,9 +32,10 @@ export const metadata: Metadata = {
     },
 };
 
-// Runs before first paint: applies the saved theme (or the OS preference) so
-// light-mode users never see a dark flash. Kept tiny and dependency-free.
-const themeScript = `(function(){try{var d;var v=localStorage.getItem('optionStrategist.view.v1');if(v){var p=JSON.parse(v);if(typeof p.darkMode==='boolean')d=p.darkMode}if(typeof d!=='boolean'){d=!window.matchMedia('(prefers-color-scheme: light)').matches}document.documentElement.setAttribute('data-theme',d?'dark':'light')}catch(e){document.documentElement.setAttribute('data-theme','dark')}})()`;
+export const viewport: Viewport = {
+    themeColor: "#050505",
+    colorScheme: "dark",
+};
 
 export default function RootLayout({
     children,
@@ -39,10 +43,7 @@ export default function RootLayout({
     children: React.ReactNode;
 }>) {
     return (
-        <html lang="en" className={inter.variable} suppressHydrationWarning>
-            <head>
-                <script dangerouslySetInnerHTML={{ __html: themeScript }} />
-            </head>
+        <html lang="en" className={mono.variable}>
             <body>{children}</body>
         </html>
     );

@@ -3,13 +3,14 @@ import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import * as MathUtils from '../utils/optionsMath';
 import type { StrategyLeg, LadderContext, FeeRole } from '../utils/optionsMath';
 import { AssetSymbol, getAssetConfig } from '../config/assets';
-import { MIN_DTE_DAYS, APR_MIN_PCT, APR_MAX_PCT, RECOMMEND_MIN_SCORE, TRADE_POOL_MIN } from '../config/constants';
+import { MIN_DTE_DAYS, APR_MIN_PCT, APR_MAX_PCT, RECOMMEND_MIN_SCORE } from '../config/constants';
 import { useDeriveChain } from '../hooks/useDeriveChain';
 import { useDeribitMarks } from '../hooks/useDeribitMarks';
 import { ControlBar } from './ControlBar';
 import { StrategyPanel, LadderResult } from './StrategyPanel';
 import { YieldMatrix } from './YieldMatrix';
 import { Tooltip, MetaTooltip } from './Tooltips';
+import { Masthead } from './Masthead';
 import type { CellData, ExpiryCol, HoverTip, MetaTip } from '../types';
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -20,7 +21,7 @@ import type { CellData, ExpiryCol, HoverTip, MetaTip } from '../types';
 
 const CONTROLS_LS_KEY = 'optionStrategist.controls.v1';
 
-export default function DeriveAssetYields({ asset, darkMode }: { asset: AssetSymbol; darkMode: boolean }) {
+export default function DeriveAssetYields({ asset }: { asset: AssetSymbol }) {
     const [hoverTip, setHoverTip] = useState<HoverTip | null>(null);
     const [hoverMeta, setHoverMeta] = useState<MetaTip | null>(null);
     const [pinnedLocs, setPinnedLocs] = useState<Record<string, { x: number; y: number }>>({});
@@ -34,9 +35,19 @@ export default function DeriveAssetYields({ asset, darkMode }: { asset: AssetSym
     const [controlsLoaded, setControlsLoaded] = useState(false);
 
     const { spot, dvol, atmIvByExpiry, opts, loading, dataAt, st, countdown, refresh } = useDeriveChain(asset);
-    const reference = spot ?? opts[0]?.futuresPrice ?? 0;
-    const cfg = useMemo(() => getAssetConfig(asset, reference), [asset, reference]);
-    const deribitPrices = useDeribitMarks(asset, cfg.deribitArb);
+    // One reference price for the OTM test and the strike window, shared by the
+    // strategy filter and the matrix: live index, else the NEAREST expiry's
+    // forward (opts[0] is just whichever expiry answered first).
+    const refPrice = useMemo(() => {
+        if (spot != null) return spot;
+        let best: { t: number; f: number } | null = null;
+        for (const o of opts) if (o.futuresPrice > 0 && (!best || o.tYears < best.t)) best = { t: o.tYears, f: o.futuresPrice };
+        return best?.f ?? 0;
+    }, [spot, opts]);
+    const cfg = useMemo(() => getAssetConfig(asset, refPrice), [asset, refPrice]);
+    const deribitPrices = useDeribitMarks(asset);
+    // Selling into the bid is always a taker fill; the toggle only applies to MARK.
+    const effRole = MathUtils.effectiveFeeRole(priceSource, feeRole);
 
     // Controls survive asset switches and reloads; per-asset view state resets.
     useEffect(() => {
@@ -70,7 +81,7 @@ export default function DeriveAssetYields({ asset, darkMode }: { asset: AssetSym
     const trades = useMemo<StrategyLeg[]>(() => {
         if (!opts.length) return [];
         const t: StrategyLeg[] = [];
-        const ref = spot ?? opts[0]?.futuresPrice ?? 0;
+        const ref = refPrice;
         for (const o of opts) {
             if (o.dte <= MIN_DTE_DAYS || excludedExp.has(o.expiry)) continue;
             if (Math.abs(o.strike - ref) > cfg.strikeRange) continue;
@@ -79,7 +90,9 @@ export default function DeriveAssetYields({ asset, darkMode }: { asset: AssetSym
             // resting bid is skipped, never priced at a synthetic 95% of mark.
             if (priceSource === 'market' && o.bidPrice <= 0) continue;
             const price = priceSource === 'market' ? o.bidPrice : o.markPrice;
-            const feeUsd = MathUtils.deriveFee(o.futuresPrice, price, feeRole);
+            // Fee notional is the INDEX price (not the forward); the taker base
+            // fee is per order, so it is shared across `contracts`.
+            const feeUsd = MathUtils.deriveFee(spot ?? o.futuresPrice, price, effRole, contracts);
             const netPrem = Math.max(0, price - feeUsd);
             const days = o.tYears * 365;
             const apr = o.type === 'P'
@@ -95,15 +108,17 @@ export default function DeriveAssetYields({ asset, darkMode }: { asset: AssetSym
                 greeks: o.greeks,
             });
         }
-        t.sort((a, b) => b.apr - a.apr);
-        return t.slice(0, Math.max(TRADE_POOL_MIN, numLegs * 4));
-    }, [opts, spot, cfg, maxPexCap, priceSource, feeRole, excludedExp, numLegs]);
+        // No cross-type top-N cut: calls and puts are searched separately
+        // (findBestLadder filters by type), so one side can never crowd the
+        // other out, and the generator samples strikes across the whole range.
+        return t;
+    }, [opts, spot, refPrice, cfg, maxPexCap, priceSource, effRole, contracts, excludedExp]);
 
-    // Deribit marks (BTC/ETH only) serve as an independent fair value so the
-    // EV factor can be scored — and unmasked — even under default MARK pricing.
+    // Deribit marks (BTC/ETH inverse, SOL/HYPE/XRP linear) are the only
+    // independent fair value — they unmask EV and the edge ratio.
     const deribitMarkByKey = useMemo(
-        () => (cfg.deribitArb ? deribitPrices.mark : undefined),
-        [cfg.deribitArb, deribitPrices.mark]
+        () => (cfg.deribit ? deribitPrices.mark : undefined),
+        [cfg.deribit, deribitPrices.mark]
     );
 
     const { callRes, putRes } = useMemo<{ callRes: LadderResult | null; putRes: LadderResult | null }>(() => {
@@ -119,8 +134,9 @@ export default function DeriveAssetYields({ asset, darkMode }: { asset: AssetSym
     const recommendedKeys = useMemo(() => {
         const s = new Set<string>();
         [callRes, putRes].forEach(r => {
-            // A pool of one candidate carries no ranking information — never highlight it.
-            if (r && r.poolSize > 1 && r.best.score >= RECOMMEND_MIN_SCORE) {
+            // Relative score AND absolute gate: never highlight a pool of one,
+            // nor a ladder that is −EV against Deribit.
+            if (r && MathUtils.isRecommended(r, RECOMMEND_MIN_SCORE)) {
                 r.best.legs.forEach(leg => s.add(`${leg.type === 'Call' ? 'C' : 'P'}-${leg.strike}-${leg.expiry}`));
             }
         });
@@ -136,7 +152,7 @@ export default function DeriveAssetYields({ asset, darkMode }: { asset: AssetSym
         const expsArr: ExpiryCol[] = [];
         em.forEach((v, k) => { expsArr.push({ label: k, ...v }); });
         const exps = expsArr.sort((a, b) => a.ts - b.ts);
-        const ref = spot ?? opts[0]?.futuresPrice ?? 0;
+        const ref = refPrice;
         const fFiltered = f.filter(o => Math.abs(o.strike - ref) <= cfg.strikeRange && (o.type === 'C' ? o.strike >= ref : o.strike <= ref));
 
         const pS = new Set<number>();
@@ -145,7 +161,7 @@ export default function DeriveAssetYields({ asset, darkMode }: { asset: AssetSym
         fFiltered.forEach(o => {
             if (priceSource === 'market' && o.bidPrice <= 0) return; // unquotable — renders as "—"
             const price = priceSource === 'market' ? o.bidPrice : o.markPrice;
-            const feeUsd = MathUtils.deriveFee(o.futuresPrice, price, feeRole);
+            const feeUsd = MathUtils.deriveFee(spot ?? o.futuresPrice, price, effRole, contracts);
             const netPrem = Math.max(0, price - feeUsd);
             const days = o.tYears * 365;
             if (o.type === 'P') pS.add(o.strike); else cS.add(o.strike);
@@ -160,7 +176,7 @@ export default function DeriveAssetYields({ asset, darkMode }: { asset: AssetSym
             };
         });
         return { exps, putK: Array.from(pS).sort((a, b) => b - a), callK: Array.from(cS).sort((a, b) => a - b), cells };
-    }, [opts, spot, priceSource, feeRole, cfg]);
+    }, [opts, spot, refPrice, priceSource, effRole, contracts, cfg]);
 
     const onHover = useCallback((tip: HoverTip | null) => setHoverTip(tip), []);
     const onHoverMeta = useCallback((m: MetaTip | null) => setHoverMeta(m), []);
@@ -198,41 +214,47 @@ export default function DeriveAssetYields({ asset, darkMode }: { asset: AssetSym
     const staleWithData = st.opt === 'err' && opts.length > 0;
 
     return (
-        <div style={{ display: 'flex', flexDirection: 'column', flex: '1 1 auto', minHeight: 0, overflow: 'hidden', gap: '2px' }}>
-            <ControlBar
-                st={st} allowRep={allowRep} numLegs={numLegs} maxPexCap={maxPexCap}
-                feeRole={feeRole} contracts={contracts}
-                dataAt={dataAt} countdown={countdown}
-                onAllowRep={onAllowRep} onNumLegs={onNumLegs} onMaxPexCap={onMaxPexCap}
-                onFeeRole={onFeeRole} onContracts={onContracts}
-            />
+        <>
+            <Masthead asset={asset} st={st} dataAt={dataAt} countdown={countdown} />
+            <div className="stripe" aria-hidden />
 
-            {staleWithData && (
-                <div role="alert" style={{ padding: '3px 8px', fontSize: 'var(--t-meta)', color: 'var(--red)', border: '1px solid var(--red)', borderRadius: '4px', display: 'flex', gap: '8px', alignItems: 'center' }}>
-                    Live refresh is failing — showing data from {dataAt?.toLocaleTimeString('en-GB')}.
-                    <button onClick={refresh} style={{ padding: '0 8px', borderRadius: '3px', border: '1px solid var(--red)', background: 'transparent', color: 'var(--red)', cursor: 'pointer', fontWeight: 600 }}>Retry now</button>
-                </div>
-            )}
+            <div className="deck">
+                <ControlBar
+                    allowRep={allowRep} numLegs={numLegs} maxPexCap={maxPexCap}
+                    feeRole={effRole} feeLocked={priceSource === 'market'} contracts={contracts}
+                    onAllowRep={onAllowRep} onNumLegs={onNumLegs} onMaxPexCap={onMaxPexCap}
+                    onFeeRole={onFeeRole} onContracts={onContracts}
+                />
 
-            <StrategyPanel
-                call={callRes} put={putRes} asset={asset} spot={spot} dvol={dvol}
-                priceSource={priceSource} feeRole={feeRole} contracts={contracts}
-                exps={exps} excludedExp={excludedExp} loading={loading}
-                onPriceSource={onPriceSource} onToggleExp={onToggleExp} onHoverMeta={onHoverMeta}
-            />
+                {staleWithData && (
+                    <div role="alert" className="stale">
+                        <b>PATTERN RED</b> Live refresh is failing — showing data from {dataAt?.toLocaleTimeString('en-GB')}.
+                        <button type="button" className="btn-line danger" onClick={refresh}>Retry now</button>
+                    </div>
+                )}
 
-            <YieldMatrix
-                exps={exps} putK={putK} callK={callK} cells={cells}
-                recommendedKeys={recommendedKeys} excludedExp={excludedExp} maxPexCap={maxPexCap}
-                deribitPrices={deribitPrices} priceSource={priceSource} darkMode={darkMode}
-                assetSymbol={cfg.symbol} pinnedLocs={pinnedLocs} spot={spot} strikeRange={cfg.strikeRange}
-                loading={loading} hasError={st.opt === 'err'} onRetry={refresh}
-                onHover={onHover} onTogglePin={onTogglePin}
-            />
+                <StrategyPanel
+                    call={callRes} put={putRes} asset={asset} spot={spot} dvol={dvol}
+                    priceSource={priceSource} feeRole={effRole} contracts={contracts}
+                    hasFairValue={!!cfg.deribit}
+                    exps={exps} excludedExp={excludedExp} loading={loading}
+                    onPriceSource={onPriceSource} onToggleExp={onToggleExp} onHoverMeta={onHoverMeta}
+                />
 
-            <div style={{ flex: '0 0 auto', padding: '2px 0', fontSize: 'var(--t-micro)', color: 'var(--text-muted)', textAlign: 'center' }}>
-                Market data: Derive & Deribit public APIs · {priceSource === 'mark' ? 'indicative mark prices' : 'best bid prices; available size not checked'} · yields net of estimated {feeRole} fees · for education only.
+                <YieldMatrix
+                    exps={exps} putK={putK} callK={callK} cells={cells}
+                    recommendedKeys={recommendedKeys} excludedExp={excludedExp} maxPexCap={maxPexCap}
+                    deribitPrices={deribitPrices} priceSource={priceSource}
+                    assetSymbol={cfg.symbol} pinnedLocs={pinnedLocs} spot={spot} strikeRange={cfg.strikeRange}
+                    loading={loading} hasError={st.opt === 'err'} onRetry={refresh}
+                    onHover={onHover} onTogglePin={onTogglePin}
+                />
             </div>
+
+            <footer id="foot">
+                <span><b>PATTERN ORANGE</b> — Derive &amp; Deribit public APIs · {priceSource === 'mark' ? 'indicative mark prices' : 'best bid prices; available size not checked'} · yields net of estimated {effRole} fees · for education only</span>
+                <span>NERV // OPTION STRATEGIST</span>
+            </footer>
 
             {/* Pinned detail cards render here at fixed viewport coordinates so the
                 tables' scroll containers can never clip them. A pin whose cell
@@ -254,6 +276,6 @@ export default function DeriveAssetYields({ asset, darkMode }: { asset: AssetSym
                 <Tooltip tip={hoverTip} priceSource={priceSource} assetSymbol={cfg.symbol} asset={asset} onHoverMeta={onHoverMeta} />
             )}
             {hoverMeta && <MetaTooltip tip={hoverMeta} />}
-        </div>
+        </>
     );
 }

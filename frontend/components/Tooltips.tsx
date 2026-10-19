@@ -1,7 +1,7 @@
 "use client";
 import { formatPrice } from '../utils/format';
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import type { HoverTip, MetaTip, Status } from '../types';
+import type { HoverTip, MetaTip } from '../types';
 import { deriveTakerFee } from '../utils/optionsMath';
 import { deriveTradeUrl } from '../utils/instruments';
 
@@ -30,7 +30,7 @@ export function MetaLabel({ title, text, label, onHoverMeta }: {
             onBlur={hide}
             onClick={(e) => { e.stopPropagation(); show(e.currentTarget); }}
             onKeyDown={(e) => { if (e.key === 'Escape') hide(); }}
-            style={{ borderBottom: '1px dashed var(--text-muted)', cursor: 'help', textUnderlineOffset: '2px' }}
+            className="meta-label"
         >
             {label}
         </span>
@@ -45,11 +45,11 @@ export function MetaTooltip({ tip }: { tip: MetaTip }) {
             position: 'fixed',
             top: Math.max(8, Math.min(tip.y + 15, vh - 130)),
             left: Math.max(8, Math.min(tip.x - 100, vw - 236)),
-            backgroundColor: 'var(--bg-panel)', border: '1px solid var(--border-strong)', padding: '10px',
-            borderRadius: '4px', zIndex: 10000, boxShadow: '0 10px 25px rgba(0,0,0,0.4)', width: '220px',
-            pointerEvents: 'none', color: 'var(--text-primary)', fontSize: '11px', lineHeight: '1.4',
+            backgroundColor: 'var(--bg-panel)', border: '1px solid var(--orange)', padding: '9px 10px',
+            zIndex: 10000, boxShadow: '0 10px 25px rgba(0,0,0,0.6)', width: '220px',
+            pointerEvents: 'none', color: 'var(--text-primary)', fontSize: '11px', lineHeight: '1.45',
         }}>
-            <div style={{ fontWeight: 800, marginBottom: '4px', borderBottom: '1px solid var(--border-color)', paddingBottom: '3px', color: 'var(--yellow)', fontSize: '10px', textTransform: 'uppercase' }}>{tip.title}</div>
+            <div style={{ fontWeight: 700, marginBottom: '5px', borderBottom: '1px solid var(--line)', paddingBottom: '4px', color: 'var(--amber)', fontSize: '10px', letterSpacing: '0.16em', textTransform: 'uppercase' }}>{tip.title}</div>
             <span style={{ color: 'var(--text-secondary)' }}>{tip.text}</span>
         </div>
     );
@@ -70,8 +70,10 @@ export function Tooltip({ tip, onClose, priceSource, assetSymbol, asset, onHover
         position: 'fixed',
         top: Math.max(8, Math.min((tip.y || 100), vh - 470)),
         left: Math.max(8, Math.min((tip.x || 100) + 15, vw - 275)),
-        backgroundColor: 'var(--bg-main)', border: '1px solid var(--border-strong)', padding: '10px',
-        borderRadius: '6px', zIndex: 9999, boxShadow: '0 10px 30px rgba(0,0,0,0.9), inset 0 0 0 1px rgba(255,255,255,0.05)',
+        backgroundColor: 'var(--bg-panel)', border: '1px solid var(--line)',
+        borderTop: `2px solid ${tip.d.type === 'Put' ? 'var(--put)' : 'var(--call)'}`,
+        outline: onClose ? '1px solid var(--pin)' : 'none', outlineOffset: '2px', padding: '10px',
+        zIndex: 9999, boxShadow: '0 10px 30px rgba(0,0,0,0.9)',
         width: '16rem', textAlign: 'left', pointerEvents: onClose ? 'auto' : 'none',
     };
 
@@ -94,8 +96,8 @@ export function Tooltip({ tip, onClose, priceSource, assetSymbol, asset, onHover
         <div style={style}>
             {onClose && <button onClick={onClose} aria-label="Close details" style={{ position: 'absolute', top: '8px', right: '8px', background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '16px', lineHeight: 1 }}>×</button>}
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px', borderBottom: '1px solid var(--border-strong)', paddingBottom: '6px' }}>
-                <div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: d.type === 'Put' ? 'var(--green)' : 'var(--yellow)' }}></div>
-                <div style={{ fontWeight: 800, fontSize: '13px', color: d.type === 'Put' ? 'var(--green)' : 'var(--yellow)', textTransform: 'uppercase', letterSpacing: '0.02em' }}>
+                <div style={{ width: '8px', height: '8px', backgroundColor: d.type === 'Put' ? 'var(--put)' : 'var(--call)' }}></div>
+                <div style={{ fontWeight: 700, fontSize: '11px', color: d.type === 'Put' ? 'var(--put)' : 'var(--call)', textTransform: 'uppercase', letterSpacing: '0.16em' }}>
                     {d.type === 'Put' ? 'Strategy Note: CSP' : 'Strategy Note: Call'}
                 </div>
             </div>
@@ -112,7 +114,7 @@ export function Tooltip({ tip, onClose, priceSource, assetSymbol, asset, onHover
             </div>
 
             <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid var(--border-strong)' }}>
-                <div style={{ fontSize: '10px', fontWeight: 800, color: 'var(--text-primary)', marginBottom: '4px', textTransform: 'uppercase', opacity: 0.8 }}>Values & Greeks</div>
+                <div style={{ fontSize: '10px', fontWeight: 400, color: 'var(--amber)', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.16em' }}>Values & Greeks</div>
                 <div style={{ fontSize: '10px', color: 'var(--text-muted)', display: 'grid', gridTemplateColumns: '1fr auto', gap: '3px 8px' }}>
                     <MetaLabel title="P(ex)" text="Probability of the option being In-The-Money (ITM) at expiration. A higher value means a higher risk of exercise." label="P(ex)" onHoverMeta={onHoverMeta} />
                     <span style={{ color: 'var(--text-primary)', fontWeight: 600, textAlign: 'right' }}>{(d.probExercise * 100).toFixed(1)}%</span>
@@ -132,28 +134,18 @@ export function Tooltip({ tip, onClose, priceSource, assetSymbol, asset, onHover
             </div>
 
             <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid var(--border-strong)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <span style={{ color: 'var(--text-muted)', fontSize: '10px', fontWeight: 600 }}>EST. APR · NET FEES</span>
-                <span style={{ fontWeight: 800, fontSize: '16px', color: 'var(--text-primary)' }}>{d.apr.toFixed(1)}%</span>
+                <span style={{ color: 'var(--text-muted)', fontSize: '10px', letterSpacing: '0.12em' }}>EST. APR · NET FEES</span>
+                <span style={{ fontFamily: 'var(--font-serif)', fontWeight: 900, fontSize: '22px', color: '#fff', lineHeight: 1 }}>{d.apr.toFixed(1)}%</span>
             </div>
 
             {onClose && (
                 <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid var(--border-strong)', display: 'flex', alignItems: 'center', gap: '8px', justifyContent: 'space-between', fontSize: '10px' }}>
-                    <button type="button" onClick={copyName} title={`Copy ${d.instrument}`} style={{ background: 'none', border: '1px solid var(--border-strong)', borderRadius: '3px', padding: '2px 6px', cursor: 'pointer', color: copied ? 'var(--green)' : 'var(--text-secondary)', fontFamily: 'inherit', fontSize: '10px' }}>
+                    <button type="button" className="btn-line" onClick={copyName} title={`Copy ${d.instrument}`} style={copied ? { color: 'var(--green)', borderColor: 'var(--green)' } : undefined}>
                         {copied ? '✓ copied' : '⧉ copy name'}
                     </button>
-                    <a href={deriveTradeUrl(asset)} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--blue)', fontWeight: 600, textDecoration: 'none' }}>Trade on Derive ↗</a>
+                    <a href={deriveTradeUrl(asset)} target="_blank" rel="noopener noreferrer" style={{ fontWeight: 700, textDecoration: 'none', letterSpacing: '0.1em', textTransform: 'uppercase' }}>Trade on Derive ↗</a>
                 </div>
             )}
         </div>
-    );
-}
-
-export function Dot({ s, label }: { s: Status; label: string }) {
-    const state = s === 'ok' ? 'live' : s === 'err' ? 'error' : 'loading';
-    return (
-        <span title={label ? `${label}: ${state}` : state} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: 'var(--t-meta)', color: 'var(--text-secondary)' }}>
-            <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: s === 'ok' ? 'var(--green)' : s === 'err' ? 'var(--red)' : 'var(--yellow)' }} />
-            {label}{s === 'err' && label ? <span style={{ color: 'var(--red)', fontWeight: 600 }}>!</span> : null}
-        </span>
     );
 }

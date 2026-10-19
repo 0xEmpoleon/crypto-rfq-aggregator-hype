@@ -14,7 +14,6 @@ export interface YieldMatrixProps {
     maxPexCap: number;
     deribitPrices: DeribitMaps;
     priceSource: 'mark' | 'market';
-    darkMode: boolean;
     assetSymbol: string;
     pinnedLocs: Record<string, { x: number; y: number }>;
     spot: number | null;
@@ -27,8 +26,8 @@ export interface YieldMatrixProps {
 }
 
 const SIDES = [
-    { t: 'C' as const, title: 'COVERED CALLS', accent: 'var(--yellow)' },
-    { t: 'P' as const, title: 'CASH SECURED PUTS', accent: 'var(--green)' },
+    { t: 'C' as const, title: 'Covered calls', accent: 'var(--call)' },
+    { t: 'P' as const, title: 'Cash-secured puts', accent: 'var(--put)' },
 ];
 
 /**
@@ -37,7 +36,7 @@ const SIDES = [
  */
 export const YieldMatrix = memo(function YieldMatrix({
     exps, putK, callK, cells, recommendedKeys, excludedExp, maxPexCap, deribitPrices,
-    priceSource, darkMode, assetSymbol, pinnedLocs, spot, strikeRange, loading, hasError,
+    priceSource, assetSymbol, pinnedLocs, spot, strikeRange, loading, hasError,
     onRetry, onHover, onTogglePin,
 }: YieldMatrixProps) {
 
@@ -51,8 +50,8 @@ export const YieldMatrix = memo(function YieldMatrix({
     } else if (hasError && !exps.length) {
         body = (
             <div style={centered} role="alert">
-                <span style={{ color: 'var(--red)', fontWeight: 600 }}>Could not load the option chain from Derive.</span>
-                <button onClick={onRetry} style={{ padding: '4px 14px', borderRadius: '4px', border: '1px solid var(--border-strong)', background: 'var(--bg-card)', color: 'var(--text-primary)', cursor: 'pointer', fontWeight: 600 }}>Retry</button>
+                <span style={{ color: 'var(--red)', letterSpacing: '0.12em' }}>PATTERN RED — could not load the option chain from Derive.</span>
+                <button type="button" className="btn-line" onClick={onRetry}>Retry</button>
             </div>
         );
     } else if (!exps.length || (!putK.length && !callK.length)) {
@@ -61,23 +60,21 @@ export const YieldMatrix = memo(function YieldMatrix({
         body = (
             <div className="two-col" style={{ flex: '1 1 auto', overflow: 'hidden' }}>
                 {SIDES.map(({ t, title, accent }) => (
-                    <div key={t} style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '12px', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '4px', flex: '0 0 auto' }}>
-                            <span style={{ width: '8px', height: '2px', backgroundColor: accent, borderRadius: '1px' }}></span> {title}
-                        </div>
-                        <div className="table-scroll" style={{ overflow: 'auto', flex: '1 1 auto' }}>
-                            <table style={{ width: '100%', borderCollapse: 'collapse', borderSpacing: 0 }}>
+                    <div key={t} style={{ display: 'flex', flexDirection: 'column', minHeight: 0, '--accent': accent } as React.CSSProperties}>
+                        <h3 className="side-h">{title}</h3>
+                        <div className="table-scroll" style={{ overflow: 'auto', flex: '1 1 auto', border: '1px solid var(--line)' }}>
+                            <table className="mx">
                                 <caption className="sr-only">{t === 'C' ? 'Covered call' : 'Cash-secured put'} net APR by strike and expiry</caption>
-                                <thead style={{ position: 'sticky', top: 0, backgroundColor: 'var(--bg-panel)', zIndex: 10 }}>
+                                <thead>
                                     <tr>
-                                        <th scope="col" style={{ textAlign: 'center', padding: '4px', fontSize: '10px', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', borderBottom: '1px solid var(--border-strong)' }}>Strike</th>
-                                        {exps.map(e => <th scope="col" key={e.label} style={{ fontSize: '10px', fontWeight: 600, color: 'var(--text-muted)', textAlign: 'center', borderBottom: '1px solid var(--border-strong)', padding: '4px' }}>{e.label}</th>)}
+                                        <th scope="col" style={{ textAlign: 'right' }}>STRIKE</th>
+                                        {exps.map(e => <th scope="col" key={e.label}>{e.label}</th>)}
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {(t === 'C' ? callK : putK).map(s => (
                                         <tr key={s}>
-                                            <th scope="row" style={{ fontSize: '12px', fontWeight: 700, padding: '4px', borderBottom: '1px solid var(--border-color)', color: 'var(--text-primary)', textAlign: 'center' }}>${formatPrice(s)}</th>
+                                            <th scope="row">${formatPrice(s)}</th>
                                             {exps.map(e => {
                                                 const k = `${t}-${s}-${e.label}`;
                                                 return (
@@ -93,7 +90,6 @@ export const YieldMatrix = memo(function YieldMatrix({
                                                         overCap={!!cells[k] && cells[k].probExercise * 100 > maxPexCap}
                                                         isPinned={!!pinnedLocs[k]}
                                                         dbitPrice={dbitMap[k]}
-                                                        darkMode={darkMode}
                                                         assetSymbol={assetSymbol}
                                                         onHover={onHover}
                                                         onTogglePin={onTogglePin}
@@ -112,20 +108,17 @@ export const YieldMatrix = memo(function YieldMatrix({
     }
 
     return (
-        <div className="neo-panel" style={{ flex: '1 1 auto', display: 'flex', flexDirection: 'column', minHeight: 0, marginTop: '0px', padding: '5px 12px 12px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '6px', flexWrap: 'wrap', gap: '4px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <span style={{ fontSize: '15px', color: 'var(--yellow)', filter: 'drop-shadow(0 0 4px rgba(234,179,8,0.5))', lineHeight: 1 }} aria-hidden>⚡</span>
-                    <div style={{ fontSize: '15px', fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.01em' }}>Covered Yield Matrix</div>
+        <section aria-labelledby="mx-h" style={{ flex: '1 1 auto', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+            <div className="sec-row">
+                <h2 id="mx-h" className="sec-h" style={{ flex: '1 1 220px' }}>Covered yield matrix</h2>
+                <div className="sec-tools ctl-item" style={{ textTransform: 'none', letterSpacing: '0.04em' }}>
+                    <span>Cell: <b className="readout-b">net APR%</b> · <b className="readout-b">P(ex)%</b> · <b className="readout-b">premium ({assetSymbol})</b>
+                        {Object.keys(dbitMap).length > 0 && <> · vs Deribit <span style={{ color: 'var(--green)' }}>▲ richer</span> / <span style={{ color: 'var(--red)' }}>▼ cheaper</span></>}</span>
+                    <span className="readout" style={{ textTransform: 'uppercase', letterSpacing: '0.12em' }}>Spot <b>{spot != null ? `$${formatPrice(spot)}` : '—'}</b> · strikes ±40%</span>
                 </div>
-                <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                    Cell: <span style={{ color: 'var(--text-secondary)' }}>net APR%</span> · <span style={{ color: 'var(--text-secondary)' }}>P(ex)%</span> · <span style={{ color: 'var(--text-secondary)' }}>premium ({assetSymbol})</span>
-                    {Object.keys(dbitMap).length > 0 && <> · vs Deribit: <span style={{ color: 'var(--green)' }}>richer</span>/<span style={{ color: 'var(--red)' }}>cheaper</span></>}
-                </div>
-                <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)' }}>Spot: <span style={{ color: 'var(--blue)' }}>{spot != null ? `$${formatPrice(spot)}` : '—'}</span> · Strikes ±40%</div>
             </div>
 
             {body}
-        </div>
+        </section>
     );
 });
