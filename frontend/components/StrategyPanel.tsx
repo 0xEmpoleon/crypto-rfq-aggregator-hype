@@ -64,7 +64,7 @@ function StrategyCard({ result, isCall, asset, spot, priceSource, feeRole, contr
     const verdict = kind === 'edge'
         ? { label: '+EV vs Deribit', color: 'var(--green)', text: 'Ranked on expected value against the matching Deribit marks, an independent venue. This ladder clears that fair value after fees.' }
         : kind === 'negative'
-            ? { label: '−EV vs Deribit', color: 'var(--red)', text: 'Even the best-ranked ladder sells below the matching Deribit fair value after fees, so it is NOT highlighted. Shown for reference only.' }
+            ? { label: '−EV vs Deribit', color: 'var(--red)', text: 'Every candidate sells below the matching Deribit fair value after fees. This is still the best-ranked ladder available on Derive (on EV and edge vs Deribit, and premium per day), so it is selected — but the same strikes price higher on Deribit.' }
             : { label: 'Yield pick', color: 'var(--purple)', text: hasFairValue
                 ? 'Deribit has no matching strikes for enough of these candidates, so there is no independent fair value. This is the best net premium per day inside your P(ex) cap, not an edge signal.'
                 : `Deribit lists no ${asset} options, so there is no independent fair value. This is the best net premium per day inside your P(ex) cap, not an edge signal.` };
@@ -104,7 +104,7 @@ function StrategyCard({ result, isCall, asset, spot, priceSource, feeRole, contr
                         <span className="unit" style={{ borderColor: verdict.color, color: verdict.color }}>
                             <MetaLabel title={verdict.label} text={verdict.text} label={verdict.label} onHoverMeta={onHoverMeta} />
                         </span>
-                        {!recommended && kind !== 'negative' && (
+                        {!recommended && (
                             <span className="unit">
                                 <MetaLabel
                                     title="Not highlighted"

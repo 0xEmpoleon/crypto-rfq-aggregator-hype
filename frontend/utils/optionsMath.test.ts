@@ -264,16 +264,16 @@ describe('findBestLadder + isRecommended', () => {
         expect(res.kind).toBe('yield');
     });
 
-    it('never highlights a ladder that is −EV against Deribit, however well it ranks', () => {
-        // Regression: the gate used to be relative score only, so the best of
-        // an all-negative pool was still recommended.
+    it('still selects the best available Derive ladder when every candidate is −EV vs Deribit', () => {
+        // The −EV verdict is a warning, not a veto: the best-ranked ladder is
+        // still selected and flagged kind 'negative'.
         const trades = [mkLeg({ strike: 90 }), mkLeg({ strike: 85, premiumUsd: 1.5 })];
         const rich = { ...ctx, deribitMarkByKey: { 'P-90-4JUL26': 5, 'P-85-4JUL26': 4 } };
         const neg = findBestLadder(trades, 'Put', rich, [1], false)!;
         expect(neg.edgeMode).toBe(true);
         expect(neg.kind).toBe('negative');
-        expect(neg.best.score).toBeGreaterThan(5);
-        expect(isRecommended(neg, 5)).toBe(false);
+        expect(neg.best.ev).toBeLessThan(0);
+        expect(isRecommended(neg, 5)).toBe(true);
 
         const cheap = { ...ctx, deribitMarkByKey: { 'P-90-4JUL26': 0.5, 'P-85-4JUL26': 0.6 } };
         const pos = findBestLadder(trades, 'Put', cheap, [1], false)!;

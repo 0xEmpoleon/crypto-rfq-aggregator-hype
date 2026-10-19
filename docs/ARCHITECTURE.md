@@ -67,7 +67,8 @@ Adapter regression tests live in `frontend/app/api/derive/routes.test.ts`.
 5. **Rank + gate** — if ≥2 candidates are fully covered by Deribit fair values,
    only those are ranked (edge mode). One min-max normalization over the pool;
    masked/flat factors drop and weights renormalize. Highlight only if
-   `poolSize > 1`, `score ≥ 5.0` **and** the pick is not −EV vs Deribit.
+   `poolSize > 1` and `score ≥ 5.0`. A −EV-vs-Deribit pick is still selected
+   (it is the best ladder available on Derive) and carries a warning badge.
 6. **Render** — heat cells, two ladder cards, explicit loading / error-retry /
    stale-data states.
 
@@ -97,8 +98,8 @@ Adapter regression tests live in `frontend/app/api/derive/routes.test.ts`.
   payoff is monotone in edge, so it is displayed, not double-counted. Same-expiry
   skew is displayed, not ranked: every OTM strike on a convex smile reads "rich",
   so it measured smile shape, not mispricing.
-- **Three verdicts.** `+EV vs Deribit` (highlighted), `−EV vs Deribit` (shown,
-  never highlighted, however well it ranks), `Yield pick` (no fair value: the
+- **Three verdicts.** `+EV vs Deribit`, `−EV vs Deribit` (still selected — the
+  best-ranked ladder Derive offers — with a red warning badge), `Yield pick` (no fair value: the
   best net premium/day inside the P(ex) cap — no edge claim). Note that
   without a fair value every yield metric is compensation for risk; the P(ex)
   cap is the user's risk choice.

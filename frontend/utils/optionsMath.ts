@@ -471,13 +471,14 @@ export function findBestLadder(trades: StrategyLeg[], type: 'Call' | 'Put', ctx:
 }
 
 /**
- * Absolute gate on top of the relative score: a pool of one carries no
- * ranking information, and a ladder that is −EV against an independent fair
- * value is never highlighted, however well it ranks against its peers.
+ * Whether to select (highlight) the pick: a pool of one carries no ranking
+ * information, and a score below the threshold is not a clear winner. A pick
+ * that is −EV against Deribit IS still selected — it is the best-ranked ladder
+ * actually available on Derive (EV, edge and premium/day) — and its
+ * `kind: 'negative'` drives a warning badge rather than hiding it.
  */
 export function isRecommended(pick: LadderPick | null, minScore: number): boolean {
-    if (!pick || pick.poolSize <= 1 || pick.best.score < minScore) return false;
-    return pick.kind !== 'negative';
+    return !!pick && pick.poolSize > 1 && pick.best.score >= minScore;
 }
 
 /**

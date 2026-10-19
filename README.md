@@ -18,7 +18,8 @@ for BTC/ETH.
 - **Strategy recommendations** — an automated finder builds 1–5 leg CC/CSP ladders and ranks
   them in one shared scoring pass ([`utils/optionsMath.ts`](frontend/utils/optionsMath.ts)).
   Where Deribit lists the same strikes it ranks on **expected value and edge vs Deribit's
-  fair value**, and a ladder that is −EV is never highlighted. Everywhere else (ADA, ZEC,
+  fair value**; if every ladder is −EV, the best-ranked one is still selected and flagged
+  **−EV vs Deribit**. Everywhere else (ADA, ZEC,
   XAUT, CC, VVV, LIT, PUMP, …), the pick is labelled a **yield pick** — best net premium/day inside your P(ex)
   cap, with no edge claim. Every card carries that verdict badge.
 - **Position sizing** — a contracts input scales each ladder into dollar totals: capital
